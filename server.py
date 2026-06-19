@@ -538,5 +538,5 @@ def safe_drive_name(name):
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", "8000"))
-    print(f"Reporter server on http://127.0.0.1:{port}")
+    print(f"Reporter server on http://0.0.0.0:{port}")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
