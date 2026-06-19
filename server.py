@@ -184,31 +184,35 @@ class Handler(SimpleHTTPRequestHandler):
         return str(ROOT / path.lstrip("/"))
 
     def do_GET(self):
-        if self.path.startswith("/api/"):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path.startswith("/api"):
             self.handle_api("GET")
             return
-        if self.path.startswith("/auth/google/start"):
+        if path == "/auth/google/start":
             self.google_start()
             return
-        if self.path.startswith("/auth/google/callback"):
+        if path == "/auth/google/callback":
             self.google_callback()
             return
         super().do_GET()
 
     def do_POST(self):
-        if self.path.startswith("/api/"):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path.startswith("/api"):
             self.handle_api("POST")
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_PUT(self):
-        if self.path.startswith("/api/"):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path.startswith("/api"):
             self.handle_api("PUT")
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_DELETE(self):
-        if self.path.startswith("/api/"):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path.startswith("/api"):
             self.handle_api("DELETE")
             return
         self.send_error(HTTPStatus.NOT_FOUND)
