@@ -336,12 +336,18 @@ class Handler(SimpleHTTPRequestHandler):
                 raise PermissionError()
 
     def _redirect_uri(self):
-        """Derive the OAuth redirect URI from the Host header, or fall back to env / default."""
+        """Derive the OAuth redirect URI from request headers or env var."""
         override = os.environ.get("GOOGLE_REDIRECT_URI")
         if override:
             return override
         host = self.headers.get("Host", "127.0.0.1:8000")
-        scheme = "https" if "upkeep.thebetterai.com" in host else "http"
+        # Respect reverse proxy headers (X-Forwarded-Proto, X-Forwarded-Host)
+        scheme = (self.headers.get("X-Forwarded-Proto", "") or "http").split(",")[0].strip()
+        forwarded_host = self.headers.get("X-Forwarded-Host", "")
+        if forwarded_host:
+            host = forwarded_host.split(",")[0].strip()
+        if not scheme or scheme not in ("http", "https"):
+            scheme = "https" if "127.0.0.1" not in host and "localhost" not in host else "http"
         return f"{scheme}://{host}/auth/google/callback"
 
     def google_start(self):
