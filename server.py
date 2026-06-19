@@ -335,11 +335,20 @@ class Handler(SimpleHTTPRequestHandler):
             if not row or row["expires_at"] < int(time.time()):
                 raise PermissionError()
 
+    def _redirect_uri(self):
+        """Derive the OAuth redirect URI from the Host header, or fall back to env / default."""
+        override = os.environ.get("GOOGLE_REDIRECT_URI")
+        if override:
+            return override
+        host = self.headers.get("Host", "127.0.0.1:8000")
+        scheme = "https" if "upkeep.thebetterai.com" in host else "http"
+        return f"{scheme}://{host}/auth/google/callback"
+
     def google_start(self):
         with db() as conn:
             cloud = json.loads(get_setting(conn, "cloud_storage") or "{}")
         client_id = cloud.get("driveClientId") or os.environ.get("GOOGLE_CLIENT_ID", "")
-        redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "http://127.0.0.1:8000/auth/google/callback")
+        redirect_uri = self._redirect_uri()
         if not client_id:
             self.send_error(400, "Missing Google client ID")
             return
@@ -367,7 +376,7 @@ class Handler(SimpleHTTPRequestHandler):
             cloud = json.loads(get_setting(conn, "cloud_storage") or "{}")
             client_id = cloud.get("driveClientId") or os.environ.get("GOOGLE_CLIENT_ID", "")
             client_secret = cloud.get("driveClientSecret") or os.environ.get("GOOGLE_CLIENT_SECRET", "")
-        redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "http://127.0.0.1:8000/auth/google/callback")
+        redirect_uri = self._redirect_uri()
         if not client_id or not client_secret:
             self.send_error(400, "Missing Google client ID/secret")
             return

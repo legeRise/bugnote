@@ -109,6 +109,10 @@ def main():
     if google_client_id and google_client_secret:
         print("\nConnect Google Drive once:")
         print(f"  http://127.0.0.1:{port}/auth/google/start")
+        if "127.0.0.1" in google_redirect_uri or "localhost" in google_redirect_uri:
+            print(f"\nIf running on a remote server, visit:")
+            print(f"  http://<your-server-domain>:{port}/auth/google/start")
+            print("\nAnd set GOOGLE_REDIRECT_URI to match your server address.")
         print("\nAdd this exact redirect URI in Google Cloud OAuth:")
         print(f"  {google_redirect_uri}")
         print("\nGoogle Cloud OAuth app type:")
