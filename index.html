@@ -18,10 +18,6 @@
             <span aria-hidden="true">□</span>
             <span>Issues</span>
           </button>
-          <button class="nav-item" type="button" data-view="settings" title="Settings">
-            <span aria-hidden="true">⚙</span>
-            <span>Settings</span>
-          </button>
         </nav>
       </aside>
 
@@ -144,7 +140,7 @@
             aria-multiline="true"
             data-placeholder="Describe the problem. Paste, upload, or capture media at the cursor..."
           ></div>
-          <p class="hint" id="storageHint">Media is stored locally for now.</p>
+          <p class="hint" id="storageHint">Media files are saved in this project folder.</p>
         </div>
 
         <div class="dialog-actions">
@@ -179,112 +175,6 @@
       </div>
     </dialog>
 
-    <dialog class="settings-dialog" id="settingsDialog">
-      <form class="settings-form" id="settingsGateForm" method="dialog">
-        <div class="dialog-head">
-          <div>
-            <h2>Settings</h2>
-            <p>Manage reporters and workflow statuses.</p>
-          </div>
-          <button class="icon-button" id="closeSettingsDialog" type="button" aria-label="Close">×</button>
-        </div>
-        <div class="status-add-row" id="settingsGate">
-          <div class="field">
-            <label for="settingsPassword">Password</label>
-            <input id="settingsPassword" type="password" placeholder="Enter settings password" />
-          </div>
-          <button class="primary-button" type="submit">Unlock</button>
-        </div>
-        <p class="hint" id="settingsHint">Prototype password: admin</p>
-      </form>
-
-      <div class="settings-form" id="settingsPanel" hidden>
-        <div class="dialog-head">
-          <div>
-            <h2>Settings</h2>
-            <p>Configure the reporter workspace.</p>
-          </div>
-          <button class="icon-button" id="closeSettingsPanel" type="button" aria-label="Close">×</button>
-        </div>
-        <div class="field settings-switcher">
-          <label for="settingsSection">Settings section</label>
-          <select id="settingsSection">
-            <option value="storage">Storage</option>
-            <option value="reporters">Reporters</option>
-            <option value="statuses">Statuses</option>
-          </select>
-        </div>
-        <section class="settings-section" data-settings-section="reporters">
-          <h3>Reporters</h3>
-          <form class="status-add-row" id="reporterForm" method="dialog">
-            <div class="field">
-              <label for="settingsReporterName">New reporter</label>
-              <input id="settingsReporterName" type="text" maxlength="80" placeholder="Habib" />
-            </div>
-            <button class="primary-button" type="submit">Add</button>
-          </form>
-          <div class="status-list" id="settingsReporterList"></div>
-        </section>
-        <section class="settings-section" data-settings-section="statuses">
-          <h3>Statuses</h3>
-          <form class="status-add-row" id="statusForm" method="dialog">
-            <div class="field">
-              <label for="newStatus">New status</label>
-              <input id="newStatus" type="text" maxlength="40" placeholder="Waiting for review" />
-            </div>
-            <button class="primary-button" type="submit">Add</button>
-          </form>
-          <div class="status-list" id="statusList"></div>
-        </section>
-        <section class="settings-section" data-settings-section="storage">
-          <h3>Storage</h3>
-          <form class="storage-form" id="storageForm" method="dialog">
-            <div class="field">
-              <label for="storageProvider">Provider</label>
-              <select id="storageProvider">
-                <option value="local">Local only</option>
-                <option value="mega">Mega</option>
-                <option value="gdrive">Google Drive</option>
-              </select>
-            </div>
-            <div class="field storage-field mega-field">
-              <label for="megaEmail">Mega email</label>
-              <input id="megaEmail" type="email" autocomplete="off" placeholder="name@example.com" />
-            </div>
-            <div class="field storage-field mega-field">
-              <label for="megaPassword">Mega password</label>
-              <input id="megaPassword" type="password" autocomplete="new-password" placeholder="Stored on this browser" />
-            </div>
-            <div class="field storage-field mega-field">
-              <label for="megaFolder">Mega folder</label>
-              <input id="megaFolder" type="text" placeholder="/Reporter Assets" />
-            </div>
-            <div class="field storage-field gdrive-field">
-              <label for="driveClientId">Drive client ID</label>
-              <input id="driveClientId" type="text" autocomplete="off" placeholder="Google OAuth client ID" />
-            </div>
-            <div class="field storage-field gdrive-field">
-              <label for="driveFolderId">Drive folder ID</label>
-              <input id="driveFolderId" type="text" placeholder="Folder ID for Reporter Assets" />
-            </div>
-            <div class="drive-connection storage-field gdrive-field">
-              <button class="secondary-button" id="connectDrive" type="button">Connect Drive</button>
-              <button class="secondary-button" id="testDriveUpload" type="button">Test Upload</button>
-              <button class="secondary-button" id="syncDriveIssues" type="button">Sync From Drive</button>
-              <span id="driveStatus">Not connected</span>
-            </div>
-            <p class="drive-sync-note storage-field gdrive-field" id="driveSyncStatus">Issue text sync writes an issue.json file inside each issue folder.</p>
-            <div class="storage-actions">
-              <span id="storageSavedText"></span>
-              <button class="primary-button" type="submit">Save Storage</button>
-            </div>
-          </form>
-        </section>
-        <p class="hint">Items already used by issues are kept to preserve history.</p>
-      </div>
-    </dialog>
-
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="./app.js"></script>
   </body>
 </html>

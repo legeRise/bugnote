@@ -1,91 +1,5 @@
-const STORAGE_KEY = "reporter.issues.v1";
-const STATUSES_KEY = "reporter.statuses.v1";
-const REPORTERS_KEY = "reporter.reporters.v1";
-const CLOUD_STORAGE_KEY = "reporter.cloudStorage.v1";
-const DRIVE_FOLDERS_KEY = "reporter.driveFolders.v1";
-const DB_NAME = "reporter-db";
-const DB_VERSION = 1;
-const DB_STORE = "state";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-const API_BASE = "";
-
 const defaultStatuses = ["open", "fixed", "closed but not fixed", "not doing"];
 const defaultReporters = ["Habib"];
-const defaultCloudStorage = {
-  provider: "local",
-  megaEmail: "",
-  megaPassword: "",
-  megaFolder: "/Reporter Assets",
-  driveClientId: "",
-  driveFolderId: "",
-};
-const storage = {
-  async loadIssues() {
-    try {
-      const saved = await idbGet(STORAGE_KEY);
-      if (Array.isArray(saved) && saved.length) return saved;
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || seedIssues();
-    } catch {
-      return seedIssues();
-    }
-  },
-  async saveIssues(issues) {
-    try {
-      await idbSet(STORAGE_KEY, issues);
-      localStorage.removeItem(STORAGE_KEY);
-      return true;
-    } catch {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(issues));
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  },
-  loadStatuses() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STATUSES_KEY));
-      return Array.isArray(saved) && saved.length ? saved : defaultStatuses;
-    } catch {
-      return defaultStatuses;
-    }
-  },
-  saveStatuses(statuses) {
-    localStorage.setItem(STATUSES_KEY, JSON.stringify([...new Set(statuses)]));
-  },
-  loadReporters() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(REPORTERS_KEY));
-      return Array.isArray(saved) && saved.length ? saved : defaultReporters;
-    } catch {
-      return defaultReporters;
-    }
-  },
-  saveReporters(reporters) {
-    localStorage.setItem(REPORTERS_KEY, JSON.stringify([...new Set(reporters)]));
-  },
-  loadCloudStorage() {
-    try {
-      return { ...defaultCloudStorage, ...JSON.parse(localStorage.getItem(CLOUD_STORAGE_KEY)) };
-    } catch {
-      return { ...defaultCloudStorage };
-    }
-  },
-  saveCloudStorage(config) {
-    localStorage.setItem(CLOUD_STORAGE_KEY, JSON.stringify(config));
-  },
-  loadDriveFolders() {
-    try {
-      return JSON.parse(localStorage.getItem(DRIVE_FOLDERS_KEY)) || {};
-    } catch {
-      return {};
-    }
-  },
-  saveDriveFolders(folders) {
-    localStorage.setItem(DRIVE_FOLDERS_KEY, JSON.stringify(folders));
-  },
-};
 
 const els = {
   totalCount: document.querySelector("#totalCount"),
@@ -125,41 +39,9 @@ const els = {
   recordingStatus: document.querySelector("#recordingStatus"),
   recordingLabel: document.querySelector("#recordingLabel"),
   recordingTimer: document.querySelector("#recordingTimer"),
-  settingsDialog: document.querySelector("#settingsDialog"),
-  settingsGateForm: document.querySelector("#settingsGateForm"),
-  settingsGate: document.querySelector("#settingsGate"),
-  settingsHint: document.querySelector("#settingsHint"),
-  settingsPassword: document.querySelector("#settingsPassword"),
-  settingsPanel: document.querySelector("#settingsPanel"),
-  settingsSection: document.querySelector("#settingsSection"),
-  closeSettingsDialog: document.querySelector("#closeSettingsDialog"),
-  closeSettingsPanel: document.querySelector("#closeSettingsPanel"),
-  reporterForm: document.querySelector("#reporterForm"),
-  settingsReporterName: document.querySelector("#settingsReporterName"),
-  settingsReporterList: document.querySelector("#settingsReporterList"),
-  statusForm: document.querySelector("#statusForm"),
-  newStatus: document.querySelector("#newStatus"),
-  statusList: document.querySelector("#statusList"),
-  storageForm: document.querySelector("#storageForm"),
-  storageProvider: document.querySelector("#storageProvider"),
-  megaEmail: document.querySelector("#megaEmail"),
-  megaPassword: document.querySelector("#megaPassword"),
-  megaFolder: document.querySelector("#megaFolder"),
-  driveClientId: document.querySelector("#driveClientId"),
-  driveFolderId: document.querySelector("#driveFolderId"),
-  connectDrive: document.querySelector("#connectDrive"),
-  testDriveUpload: document.querySelector("#testDriveUpload"),
-  syncDriveIssues: document.querySelector("#syncDriveIssues"),
-  driveStatus: document.querySelector("#driveStatus"),
-  driveSyncStatus: document.querySelector("#driveSyncStatus"),
-  storageSavedText: document.querySelector("#storageSavedText"),
 };
 
 let issues = [];
-let statuses = storage.loadStatuses();
-let reporters = storage.loadReporters();
-let cloudStorage = storage.loadCloudStorage();
-let driveFolders = storage.loadDriveFolders();
 let editingId = null;
 let draftIssueId = null;
 let savedRange = null;
@@ -171,31 +53,11 @@ let recordingStartedAt = 0;
 let pausedDurationMs = 0;
 let pauseStartedAt = 0;
 let timerId = null;
-let driveToken = "";
-let driveTokenExpiresAt = 0;
-let driveTokenClient = null;
-let driveTokenRequest = null;
 
-function seedIssues() {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: 1,
-      title: "Example: image stays beside the related step",
-      reporter: "Habib",
-      status: "open",
-      description:
-        "<ol><li>Open the page.</li><li>Click the create button.</li><li>Paste screenshots directly under the step they prove.</li></ol>",
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
-}
+init();
 
 async function init() {
-  issues = await storage.loadIssues();
-  await hydrateFromServer();
-  syncStatusOptions();
+  await loadIssues();
   bindEvents();
   render();
 }
@@ -231,23 +93,15 @@ function bindEvents() {
       saveSelection();
     });
   });
-  document.querySelector('[data-view="settings"]').addEventListener("click", openSettingsDialog);
-  els.closeSettingsDialog.addEventListener("click", () => els.settingsDialog.close());
-  els.closeSettingsPanel.addEventListener("click", () => els.settingsDialog.close());
-  els.settingsSection.addEventListener("change", renderSettingsSection);
-  els.settingsGateForm.addEventListener("submit", unlockSettings);
-  els.reporterForm.addEventListener("submit", addReporter);
-  els.statusForm.addEventListener("submit", addStatus);
-  els.storageProvider.addEventListener("change", toggleStorageFields);
-  els.storageForm.addEventListener("submit", saveStorageSettings);
-  els.connectDrive.addEventListener("click", connectGoogleDrive);
-  els.testDriveUpload.addEventListener("click", testGoogleDriveUpload);
-  els.syncDriveIssues.addEventListener("click", syncIssuesFromDrive);
+}
+
+async function loadIssues() {
+  const data = await apiJson("/api/issues");
+  issues = Array.isArray(data.issues) ? data.issues : [];
 }
 
 function render() {
-  syncStatusOptions();
-  renderStorageSettings();
+  syncOptions();
   renderStats();
   renderIssues();
 }
@@ -268,7 +122,7 @@ function renderIssues() {
   const status = els.statusFilter.value;
   const reporter = els.reporterFilter.value;
   const filtered = issues.filter((issue) => {
-    const text = [issue.id, issue.title, issue.reporter, stripHtml(issue.description)].join(" ").toLowerCase();
+    const text = [issue.id, issue.title, issue.reporter, stripHtml(issue.descriptionHtml)].join(" ").toLowerCase();
     return (!query || text.includes(query)) && (!status || issue.status === status) && (!reporter || issue.reporter === reporter);
   });
 
@@ -276,7 +130,7 @@ function renderIssues() {
   filtered.forEach((issue) => {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td data-label="#">${issue.id}</td>
+      <td data-label="#">${issue.number || String(issue.id).padStart(4, "0")}</td>
       <td data-label="Title" class="title-cell"></td>
       <td data-label="Description" class="desc-cell"></td>
       <td data-label="Status"><span class="status-pill ${statusClass(issue.status)}"></span></td>
@@ -286,7 +140,7 @@ function renderIssues() {
       <td data-label="Details"><button class="secondary-button" type="button" data-edit="${issue.id}">View</button></td>
     `;
     row.children[1].textContent = issue.title;
-    row.children[2].textContent = previewText(issue.description);
+    row.children[2].textContent = previewText(issue.descriptionHtml, issue.media);
     row.children[3].querySelector("span").textContent = titleCase(issue.status);
     row.children[4].textContent = issue.reporter || "-";
     els.issuesTable.appendChild(row);
@@ -298,15 +152,13 @@ function renderIssues() {
   });
 }
 
-function syncStatusOptions() {
-  const selectedFilter = els.statusFilter.value;
-  const selectedIssue = els.issueStatus.value;
-  fillSelect(els.statusFilter, [["", "All statuses"], ...statuses.map((status) => [status, titleCase(status)])], selectedFilter);
-  fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), selectedIssue || "open");
-
-  const allReporters = sortedReporters();
-  fillSelect(els.reporterFilter, [["", "All names"], ...allReporters.map((name) => [name, name])], els.reporterFilter.value);
-  fillSelect(els.reporterName, [...allReporters.map((name) => [name, name]), ["__new__", "New reporter"]], els.reporterName.value);
+function syncOptions() {
+  const statuses = [...new Set([...defaultStatuses, ...issues.map((issue) => issue.status).filter(Boolean)])];
+  const reporters = sortedReporters();
+  fillSelect(els.statusFilter, [["", "All statuses"], ...statuses.map((status) => [status, titleCase(status)])], els.statusFilter.value);
+  fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), els.issueStatus.value || "open");
+  fillSelect(els.reporterFilter, [["", "All names"], ...reporters.map((name) => [name, name])], els.reporterFilter.value);
+  fillSelect(els.reporterName, [...reporters.map((name) => [name, name]), ["__new__", "New reporter"]], els.reporterName.value);
 }
 
 function fillSelect(select, options, currentValue) {
@@ -317,9 +169,7 @@ function fillSelect(select, options, currentValue) {
     option.textContent = label;
     select.appendChild(option);
   });
-  if (options.some(([value]) => value === currentValue)) {
-    select.value = currentValue;
-  }
+  if (options.some(([value]) => value === currentValue)) select.value = currentValue;
 }
 
 function resetFilters() {
@@ -329,20 +179,26 @@ function resetFilters() {
   renderIssues();
 }
 
-function openIssueDialog(id) {
-  editingId = id || null;
-  draftIssueId = editingId || nextIssueId();
+async function openIssueDialog(id = null) {
+  editingId = id;
   const issue = issues.find((item) => item.id === editingId);
-  els.dialogTitle.textContent = issue ? `Issue #${issue.id}` : "Create Issue";
+  if (issue) {
+    draftIssueId = issue.id;
+  } else {
+    const data = await apiJson("/api/issues/next-id");
+    draftIssueId = data.id;
+  }
+
+  els.dialogTitle.textContent = issue ? `Issue #${issue.number || issue.id}` : `Create Issue #${String(draftIssueId).padStart(4, "0")}`;
   els.issueTitle.value = issue?.title || "";
-  ensureReporter(issue?.reporter || reporters[0] || "");
-  syncStatusOptions();
-  els.reporterName.value = issue?.reporter || reporters[0] || "__new__";
+  syncOptions();
+  els.reporterName.value = issue?.reporter || defaultReporters[0];
   els.newReporterName.value = "";
   els.issueStatus.value = issue?.status || "open";
-  els.issueDescription.innerHTML = repairMediaHtml(issue?.description || "");
+  els.issueDescription.innerHTML = repairMediaHtml(issue?.descriptionHtml || "");
   els.deleteIssue.hidden = !issue;
   els.formError.textContent = "";
+  els.storageHint.textContent = `Images and videos will be written to media/issue-${String(draftIssueId).padStart(4, "0")}/`;
   toggleNewReporter();
   els.issueDialog.showModal();
   setTimeout(() => els.issueTitle.focus(), 0);
@@ -359,196 +215,42 @@ async function saveIssue(event) {
   event.preventDefault();
   const title = els.issueTitle.value.trim();
   const reporter = resolveReporter();
-  const description = sanitizeEditorHtml(els.issueDescription.innerHTML);
   const status = els.issueStatus.value;
+  const descriptionHtml = sanitizeEditorHtml(els.issueDescription.innerHTML);
+  const media = collectMedia();
 
-  if (!title) {
-    els.formError.textContent = "Title is required.";
-    els.issueTitle.focus();
-    return;
-  }
+  if (!title) return showError("Title is required.");
+  if (!reporter) return showError("Reporter is required.");
+  if (!stripHtml(descriptionHtml) && !media.length) return showError("Description or media is required.");
 
-  if (!stripHtml(description) && !description.includes("<img") && !description.includes("<video")) {
-    els.formError.textContent = "Description or media is required.";
-    els.issueDescription.focus();
-    return;
-  }
-
-  if (!status) {
-    els.formError.textContent = "Status is required.";
-    return;
-  }
-  if (!reporter) {
-    els.formError.textContent = "Reporter is required.";
-    return;
-  }
-  if (!reporters.includes(reporter)) {
-    reporters.push(reporter);
-    storage.saveReporters(reporters);
-  }
-
-  const now = new Date().toISOString();
-  let savedIssue = null;
-  if (editingId) {
-    issues = issues.map((issue) =>
-      issue.id === editingId ? { ...issue, title, reporter, status, description, updatedAt: now } : issue,
-    );
-    savedIssue = issues.find((issue) => issue.id === editingId);
+  const payload = { id: draftIssueId || editingId, title, reporter, status, descriptionHtml, media };
+  const result = await apiJson("/api/issues", { method: "POST", body: payload });
+  const saved = result.issue;
+  const existingIndex = issues.findIndex((issue) => issue.id === saved.id);
+  if (existingIndex >= 0) {
+    issues[existingIndex] = saved;
   } else {
-    savedIssue = {
-      id: draftIssueId || nextIssueId(),
-      title,
-      reporter,
-      status,
-      description,
-      createdAt: now,
-      updatedAt: now,
-    };
-    issues.unshift(savedIssue);
+    issues.unshift(saved);
   }
-
-  const saved = await storage.saveIssues(issues);
-  if (!saved) {
-    els.formError.textContent = "Could not save. The browser storage quota may be full.";
-    return;
-  }
-  await saveIssuesToServer();
-  syncIssueToDrive(savedIssue);
   closeIssueDialog();
   render();
 }
 
 async function deleteCurrentIssue() {
   if (!editingId) return;
-  const ok = confirm(`Delete issue #${editingId}?`);
-  if (!ok) return;
+  if (!confirm(`Delete issue #${String(editingId).padStart(4, "0")} and its media folder?`)) return;
+  await apiJson(`/api/issues/${editingId}`, { method: "DELETE" });
   issues = issues.filter((issue) => issue.id !== editingId);
-  await storage.saveIssues(issues);
-  await saveIssuesToServer();
   closeIssueDialog();
   render();
 }
 
-function openSettingsDialog() {
-  els.settingsPanel.hidden = true;
-  els.settingsGate.hidden = false;
-  els.settingsHint.hidden = false;
-  els.settingsPassword.value = "";
-  els.settingsDialog.showModal();
-  setTimeout(() => els.settingsPassword.focus(), 0);
-}
-
-function unlockSettings(event) {
-  event.preventDefault();
-  if (els.settingsPassword.value !== "admin") {
-    els.settingsHint.textContent = "Wrong password. Prototype password: admin";
-    return;
-  }
-  els.settingsGate.hidden = true;
-  els.settingsHint.hidden = true;
-  els.settingsPanel.hidden = false;
-  renderSettingsLists();
-}
-
-function renderSettingsLists() {
-  renderSettingsSection();
-  renderReporterList();
-  renderStatusList();
-  renderStorageSettings();
-}
-
-function renderSettingsSection() {
-  const selected = els.settingsSection.value || "storage";
-  document.querySelectorAll("[data-settings-section]").forEach((section) => {
-    section.hidden = section.dataset.settingsSection !== selected;
-  });
-}
-
-function renderStatusList() {
-  els.statusList.innerHTML = "";
-  statuses.forEach((status) => {
-    const used = issues.some((issue) => issue.status === status);
-    const row = document.createElement("div");
-    row.className = "status-row";
-    row.innerHTML = `
-      <span class="status-pill ${statusClass(status)}"></span>
-      <button class="ghost-button" type="button" ${used ? "disabled" : ""}>Delete</button>
-    `;
-    row.querySelector("span").textContent = titleCase(status);
-    row.querySelector("button").addEventListener("click", () => removeStatus(status));
-    els.statusList.appendChild(row);
-  });
-}
-
-function renderReporterList() {
-  els.settingsReporterList.innerHTML = "";
-  sortedReporters().forEach((reporter) => {
-    const used = issues.some((issue) => issue.reporter === reporter);
-    const row = document.createElement("div");
-    row.className = "status-row";
-    row.innerHTML = `
-      <span></span>
-      <button class="ghost-button" type="button" ${used ? "disabled" : ""}>Delete</button>
-    `;
-    row.querySelector("span").textContent = reporter;
-    row.querySelector("button").addEventListener("click", () => removeReporter(reporter));
-    els.settingsReporterList.appendChild(row);
-  });
-}
-
-function addReporter(event) {
-  event.preventDefault();
-  const reporter = normalizeName(els.settingsReporterName.value);
-  if (!reporter || reporters.includes(reporter)) {
-    els.settingsReporterName.value = "";
-    return;
-  }
-  reporters.push(reporter);
-  storage.saveReporters(reporters);
-  saveNamedListToServer("reporters", reporters);
-  els.settingsReporterName.value = "";
-  syncStatusOptions();
-  renderReporterList();
-}
-
-function addStatus(event) {
-  event.preventDefault();
-  const status = normalizeStatus(els.newStatus.value);
-  if (!status || statuses.includes(status)) {
-    els.newStatus.value = "";
-    return;
-  }
-  statuses.push(status);
-  storage.saveStatuses(statuses);
-  saveNamedListToServer("statuses", statuses);
-  els.newStatus.value = "";
-  syncStatusOptions();
-  renderStatusList();
-}
-
-function removeStatus(status) {
-  if (issues.some((issue) => issue.status === status)) return;
-  statuses = statuses.filter((item) => item !== status);
-  storage.saveStatuses(statuses);
-  saveNamedListToServer("statuses", statuses);
-  syncStatusOptions();
-  renderStatusList();
-}
-
-function removeReporter(reporter) {
-  if (issues.some((issue) => issue.reporter === reporter)) return;
-  reporters = reporters.filter((item) => item !== reporter);
-  storage.saveReporters(reporters);
-  saveNamedListToServer("reporters", reporters);
-  syncStatusOptions();
-  renderReporterList();
+function showError(message) {
+  els.formError.textContent = message;
 }
 
 function resolveReporter() {
-  if (els.reporterName.value === "__new__") {
-    return normalizeName(els.newReporterName.value);
-  }
-  return els.reporterName.value;
+  return els.reporterName.value === "__new__" ? normalizeName(els.newReporterName.value) : els.reporterName.value;
 }
 
 function toggleNewReporter() {
@@ -558,80 +260,9 @@ function toggleNewReporter() {
 }
 
 function sortedReporters() {
-  const fromIssues = issues.map((issue) => issue.reporter).filter(Boolean);
-  return [...new Set([...reporters, ...fromIssues])].sort((a, b) => a.localeCompare(b));
-}
-
-function ensureReporter(reporter) {
-  if (!reporter || reporters.includes(reporter)) return;
-  reporters.push(reporter);
-  storage.saveReporters(reporters);
-}
-
-function renderStorageSettings() {
-  els.storageProvider.value = cloudStorage.provider || "local";
-  els.megaEmail.value = cloudStorage.megaEmail || "";
-  els.megaPassword.value = cloudStorage.megaPassword || "";
-  els.megaFolder.value = cloudStorage.megaFolder || "/Reporter Assets";
-  els.driveClientId.value = cloudStorage.driveClientId || "";
-  els.driveFolderId.value = cloudStorage.driveFolderId || "";
-  els.storageHint.textContent = storageHintText();
-  updateDriveStatus();
-  toggleStorageFields();
-}
-
-function toggleStorageFields() {
-  const provider = els.storageProvider.value;
-  document.querySelectorAll(".mega-field").forEach((field) => {
-    field.hidden = provider !== "mega";
-  });
-  document.querySelectorAll(".gdrive-field").forEach((field) => {
-    field.hidden = provider !== "gdrive";
-  });
-}
-
-function saveStorageSettings(event) {
-  event.preventDefault();
-  cloudStorage = {
-    provider: els.storageProvider.value,
-    megaEmail: els.megaEmail.value.trim(),
-    megaPassword: els.megaPassword.value,
-    megaFolder: els.megaFolder.value.trim() || "/Reporter Assets",
-    driveClientId: els.driveClientId.value.trim(),
-    driveFolderId: els.driveFolderId.value.trim(),
-  };
-  storage.saveCloudStorage(cloudStorage);
-  saveCloudStorageToServer();
-  if (cloudStorage.provider !== "gdrive") {
-    driveToken = "";
-    driveTokenExpiresAt = 0;
-  }
-  renderStorageSettings();
-  els.storageSavedText.textContent = "Saved";
-  setTimeout(() => {
-    els.storageSavedText.textContent = "";
-  }, 1800);
-}
-
-function nextIssueId() {
-  return issues.reduce((max, issue) => Math.max(max, issue.id), 0) + 1;
-}
-
-function saveSelection() {
-  const selection = window.getSelection();
-  if (!selection.rangeCount) return;
-  const range = selection.getRangeAt(0);
-  if (els.issueDescription.contains(range.commonAncestorContainer)) {
-    savedRange = range.cloneRange();
-  }
-}
-
-function restoreSelection() {
-  els.issueDescription.focus();
-  if (!savedRange) return;
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(savedRange);
+  return [...new Set([...defaultReporters, ...issues.map((issue) => issue.reporter).filter(Boolean)])].sort((a, b) =>
+    a.localeCompare(b),
+  );
 }
 
 async function handleUpload(event) {
@@ -659,49 +290,59 @@ async function insertFiles(files) {
   if (!mediaFiles.length) return;
   restoreSelection();
   for (const file of mediaFiles) {
-    const src = await readFileAsDataUrl(file);
-    const type = normalizeMediaType(file.type, file.name);
-    const node = insertMedia(src, type, file.name, { provider: cloudStorage.provider });
-    uploadAssetInBackground(file, file.name, type, node);
+    const asset = await uploadMedia(file, file.name, normalizeMediaType(file.type, file.name));
+    insertMedia(asset.url, asset.type, asset.name, asset.path);
   }
   saveSelection();
 }
 
-function insertMedia(src, mimeType, name = "media", asset = null) {
+async function uploadMedia(blob, name, type) {
+  if (!draftIssueId && !editingId) throw new Error("Open an issue before adding media.");
+  const form = new FormData();
+  form.append("issueId", String(draftIssueId || editingId));
+  form.append("name", name);
+  form.append("type", type);
+  form.append("file", blob, name);
+  return apiJson("/api/media", { method: "POST", body: form, isForm: true });
+}
+
+function insertMedia(src, mimeType, name = "media", path = "") {
   restoreSelection();
   const safeType = normalizeMediaType(mimeType, name);
   const wrapper = document.createElement("figure");
   wrapper.className = "media-embed";
   wrapper.contentEditable = "false";
   const node = safeType.startsWith("video/") ? document.createElement("video") : document.createElement("img");
-  const safeSrc = normalizeDataUrlMime(src, safeType);
   node.dataset.name = name;
   node.dataset.type = safeType;
-  if (asset?.provider) node.dataset.storageProvider = asset.provider;
-  if (asset?.id) node.dataset.driveId = asset.id;
-  if (asset?.webViewLink) node.dataset.driveLink = asset.webViewLink;
+  node.dataset.path = path;
   if (node.tagName === "VIDEO") {
     node.controls = true;
     node.playsInline = true;
     node.preload = "metadata";
     const source = document.createElement("source");
-    source.src = safeSrc;
+    source.src = src;
     source.type = safeType;
     node.appendChild(source);
   } else {
-    node.src = safeSrc;
+    node.src = src;
     node.alt = name;
   }
   wrapper.appendChild(node);
-  if (cloudStorage.provider === "gdrive") {
-    const status = document.createElement("figcaption");
-    status.className = "upload-status pending";
-    status.textContent = "Waiting to upload to Drive...";
-    wrapper.appendChild(status);
-  }
   insertNodeAtCursor(wrapper);
   insertNodeAtCursor(document.createElement("br"));
-  return wrapper;
+}
+
+function collectMedia() {
+  return [...els.issueDescription.querySelectorAll("img, video")].map((node) => {
+    const source = node.querySelector("source");
+    return {
+      name: node.dataset.name || node.getAttribute("alt") || "media",
+      type: node.dataset.type || source?.type || "",
+      path: node.dataset.path || "",
+      url: source?.src || node.src || "",
+    };
+  });
 }
 
 function insertNodeAtCursor(node) {
@@ -721,6 +362,21 @@ function insertNodeAtCursor(node) {
   savedRange = range.cloneRange();
 }
 
+function saveSelection() {
+  const selection = window.getSelection();
+  if (!selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (els.issueDescription.contains(range.commonAncestorContainer)) savedRange = range.cloneRange();
+}
+
+function restoreSelection() {
+  els.issueDescription.focus();
+  if (!savedRange) return;
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedRange);
+}
+
 function saveSelectionFromPoint(x, y) {
   let range = null;
   if (document.caretRangeFromPoint) {
@@ -730,9 +386,7 @@ function saveSelectionFromPoint(x, y) {
     range = document.createRange();
     range.setStart(position.offsetNode, position.offset);
   }
-  if (range && els.issueDescription.contains(range.commonAncestorContainer)) {
-    savedRange = range;
-  }
+  if (range && els.issueDescription.contains(range.commonAncestorContainer)) savedRange = range;
 }
 
 async function openCameraDialog() {
@@ -743,8 +397,8 @@ async function openCameraDialog() {
     await els.cameraPreview.play();
     resetRecordingUi();
     els.cameraDialog.showModal();
-  } catch (error) {
-    els.formError.textContent = "Camera access is unavailable. Use upload or paste instead.";
+  } catch {
+    showError("Camera access is unavailable. Use upload or paste instead.");
   }
 }
 
@@ -769,19 +423,14 @@ function capturePhoto() {
   canvas.toBlob(async (blob) => {
     if (!blob) return;
     const name = timestampedName("photo", "png");
-    const src = canvas.toDataURL("image/png");
-    const node = insertMedia(src, "image/png", name, { provider: cloudStorage.provider });
-    uploadAssetInBackground(blob, name, "image/png", node);
+    const asset = await uploadMedia(blob, name, "image/png");
+    insertMedia(asset.url, asset.type, asset.name, asset.path);
     closeCameraDialog();
   }, "image/png");
 }
 
 function toggleRecording() {
-  if (mediaRecorder?.state === "recording") {
-    stopRecording(true);
-    return;
-  }
-  if (mediaRecorder?.state === "paused") {
+  if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") {
     stopRecording(true);
     return;
   }
@@ -789,8 +438,7 @@ function toggleRecording() {
   recordedChunks = [];
   shouldSaveRecording = true;
   const mimeType = supportedRecorderType();
-  const options = mimeType ? { mimeType } : undefined;
-  mediaRecorder = new MediaRecorder(cameraStream, options);
+  mediaRecorder = new MediaRecorder(cameraStream, mimeType ? { mimeType } : undefined);
   mediaRecorder.addEventListener("dataavailable", (event) => {
     if (event.data.size) recordedChunks.push(event.data);
   });
@@ -798,10 +446,9 @@ function toggleRecording() {
     if (!shouldSaveRecording || !recordedChunks.length) return;
     const blobType = normalizeMediaType(mediaRecorder.mimeType || recordedChunks[0].type || "video/webm", "camera-video.webm");
     const blob = new Blob(recordedChunks, { type: blobType });
-    const src = await readFileAsDataUrl(blob);
     const name = timestampedName("video", "webm");
-    const node = insertMedia(src, blobType, name, { provider: cloudStorage.provider });
-    uploadAssetInBackground(blob, name, blobType, node);
+    const asset = await uploadMedia(blob, name, blobType);
+    insertMedia(asset.url, asset.type, asset.name, asset.path);
     closeCameraDialog();
   });
   mediaRecorder.start();
@@ -812,10 +459,7 @@ function toggleRecording() {
 }
 
 function stopRecording(shouldSave) {
-  if (mediaRecorder?.state === "recording") {
-    shouldSaveRecording = shouldSave;
-    mediaRecorder.stop();
-  } else if (mediaRecorder?.state === "paused") {
+  if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") {
     shouldSaveRecording = shouldSave;
     mediaRecorder.stop();
   }
@@ -881,48 +525,6 @@ function supportedRecorderType() {
   return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function openDb() {
-  return new Promise((resolve, reject) => {
-    if (!("indexedDB" in window)) {
-      reject(new Error("IndexedDB unavailable"));
-      return;
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(DB_STORE);
-    };
-  });
-}
-
-async function idbGet(key) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-async function idbSet(key, value) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(DB_STORE, "readwrite").objectStore(DB_STORE).put(value, key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
-}
-
 function isSupportedMedia(file) {
   return file?.type?.startsWith("image/") || file?.type?.startsWith("video/");
 }
@@ -933,27 +535,48 @@ function sanitizeEditorHtml(html) {
   template.content.querySelectorAll("script, style, iframe, object, embed").forEach((node) => node.remove());
   template.content.querySelectorAll("*").forEach((node) => {
     [...node.attributes].forEach((attr) => {
-      const allowed = [
-        "src",
-        "type",
-        "alt",
-        "controls",
-        "playsinline",
-        "preload",
-        "data-name",
-        "data-type",
-        "data-storage-provider",
-        "data-drive-id",
-        "data-drive-link",
-        "class",
-        "contenteditable",
-      ];
-      if (attr.name.startsWith("on") || (!allowed.includes(attr.name) && node.tagName !== "A")) {
-        node.removeAttribute(attr.name);
-      }
+      const allowed = ["src", "type", "alt", "controls", "playsinline", "preload", "data-name", "data-type", "data-path", "class", "contenteditable"];
+      if (attr.name.startsWith("on") || !allowed.includes(attr.name)) node.removeAttribute(attr.name);
     });
   });
   return template.innerHTML.trim();
+}
+
+function repairMediaHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("video").forEach((video) => {
+    const source = video.querySelector("source");
+    const src = source?.getAttribute("src") || video.getAttribute("src");
+    if (!src) return;
+    video.removeAttribute("src");
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    if (!source) {
+      const nextSource = document.createElement("source");
+      nextSource.src = src;
+      nextSource.type = video.dataset.type || normalizeMediaType("", video.dataset.name || "");
+      video.appendChild(nextSource);
+    }
+  });
+  return template.innerHTML;
+}
+
+async function apiJson(path, options = {}) {
+  const init = { method: options.method || "GET" };
+  if (options.body) {
+    if (options.isForm) {
+      init.body = options.body;
+    } else {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(options.body);
+    }
+  }
+  const response = await fetch(path, init);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
 }
 
 function stripHtml(html) {
@@ -962,28 +585,26 @@ function stripHtml(html) {
   return div.textContent.trim();
 }
 
-function previewText(html) {
+function previewText(html, media = []) {
   const text = stripHtml(html);
-  return text ? text.slice(0, 180) + (text.length > 180 ? "..." : "") : "Media only";
+  if (text) return text.slice(0, 180) + (text.length > 180 ? "..." : "");
+  return media.length ? `${media.length} media file${media.length === 1 ? "" : "s"}` : "No description";
 }
 
-function normalizeStatus(status) {
-  return status.trim().toLowerCase().replace(/\s+/g, " ");
+function titleCase(value) {
+  return String(value || "").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function normalizeName(name) {
   return name.trim().replace(/\s+/g, " ");
 }
 
-function titleCase(value) {
-  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 function statusClass(status) {
-  return `status-${status.replace(/\s+/g, "-")}`;
+  return `status-${String(status || "open").replace(/\s+/g, "-")}`;
 }
 
 function formatDate(date) {
+  if (!date) return "-";
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "short",
@@ -995,8 +616,7 @@ function formatDate(date) {
 
 function normalizeMediaType(type = "", name = "") {
   const cleanType = type.toLowerCase().split(";")[0].trim();
-  if (cleanType.startsWith("video/")) return cleanType;
-  if (cleanType.startsWith("image/")) return cleanType;
+  if (cleanType.startsWith("video/") || cleanType.startsWith("image/")) return cleanType;
   const lowerName = name.toLowerCase();
   if (lowerName.endsWith(".mp4")) return "video/mp4";
   if (lowerName.endsWith(".mov")) return "video/quicktime";
@@ -1006,543 +626,12 @@ function normalizeMediaType(type = "", name = "") {
   return "application/octet-stream";
 }
 
-function normalizeDataUrlMime(src, type) {
-  if (typeof src !== "string" || !src.startsWith("data:")) return src;
-  const base64Marker = ";base64,";
-  const base64Index = src.indexOf(base64Marker);
-  if (base64Index > -1) {
-    return `data:${type};base64,${src.slice(base64Index + base64Marker.length)}`;
-  }
-  const commaIndex = src.indexOf(",");
-  if (commaIndex > -1) {
-    return `data:${type},${src.slice(commaIndex + 1)}`;
-  }
-  return src;
-}
-
-function repairMediaHtml(html) {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  template.content.querySelectorAll("video").forEach((video) => {
-    const source = video.querySelector("source");
-    const src = source?.getAttribute("src") || video.getAttribute("src");
-    if (!src) return;
-    const type = normalizeMediaType(source?.getAttribute("type") || video.dataset.type || "video/webm", video.dataset.name || "");
-    video.removeAttribute("src");
-    video.dataset.type = type;
-    video.controls = true;
-    video.playsInline = true;
-    video.preload = "metadata";
-    if (!source) {
-      const newSource = document.createElement("source");
-      newSource.src = normalizeDataUrlMime(src, type);
-      newSource.type = type;
-      video.appendChild(newSource);
-    } else {
-      source.src = normalizeDataUrlMime(src, type);
-      source.type = type;
-    }
-  });
-  return template.innerHTML;
-}
-
-function storageHintText() {
-  if (cloudStorage.provider === "mega") {
-    return `Media destination: Mega ${cloudStorage.megaFolder || "/Reporter Assets"} (upload connector not active yet).`;
-  }
-  if (cloudStorage.provider === "gdrive") {
-    return driveToken ? "Media destination: Google Drive is connected." : "Media destination: Google Drive. Connect Drive in Settings before uploading.";
-  }
-  return "Media is stored locally in this browser for now.";
-}
-
-async function storeAsset(blob, name, type) {
-  return storeAssetForIssue(blob, name, type, draftIssueId || editingId || nextIssueId());
-}
-
-async function storeAssetForIssue(blob, name, type, issueId) {
-  if (cloudStorage.provider !== "gdrive") {
-    return { provider: "local" };
-  }
-  const serverResult = await storeAssetOnServer(blob, name, type, issueId);
-  if (serverResult?.provider === "gdrive") {
-    return serverResult;
-  }
-  if (!cloudStorage.driveClientId) {
-    els.formError.textContent = "Google Drive client ID is missing in Settings. Saved locally for now.";
-    return { provider: "local" };
-  }
-  try {
-    const token = await ensureDriveToken(false);
-    const folderId = await ensureIssueDriveFolder(token, issueId);
-    const result = await uploadToGoogleDrive(blob, name, type, token, folderId);
-    els.formError.textContent = "";
-    return { provider: "gdrive", ...result };
-  } catch (error) {
-    els.formError.textContent = `Drive upload failed: ${error.message}. Saved locally for now.`;
-    return { provider: "local", error: error.message };
-  }
-}
-
-async function storeAssetOnServer(blob, name, type, issueId) {
-  try {
-    const form = new FormData();
-    form.append("file", blob, name);
-    form.append("name", name);
-    form.append("type", type);
-    form.append("issueId", String(issueId));
-    form.append("title", els.issueTitle.value.trim());
-    const response = await fetch("/api/drive/upload", {
-      method: "POST",
-      body: form,
-      credentials: "same-origin",
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Server upload failed (${response.status})`);
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-function uploadAssetInBackground(blob, name, type, wrapper) {
-  const status = wrapper?.querySelector(".upload-status");
-  const media = wrapper?.querySelector("img, video");
-  const issueId = draftIssueId || editingId || nextIssueId();
-  if (cloudStorage.provider !== "gdrive") {
-    if (status) status.remove();
-    return;
-  }
-  setUploadStatus(status, "uploading", `Uploading ${name} to Drive...`);
-  storeAssetForIssue(blob, name, type, issueId)
-    .then((asset) => {
-      if (asset.provider !== "gdrive") {
-        setUploadStatus(status, "failed", "Drive upload failed. Kept locally.");
-        persistMediaStateForIssue(issueId, wrapper);
-        return;
-      }
-      if (media) {
-        media.dataset.storageProvider = "gdrive";
-        media.dataset.driveId = asset.id || "";
-        media.dataset.driveLink = asset.webViewLink || "";
-      }
-      setUploadStatus(status, "done", "Uploaded to Drive");
-      persistMediaStateForIssue(issueId, wrapper);
-    })
-    .catch((error) => {
-      setUploadStatus(status, "failed", `Upload failed: ${error.message}`);
-      persistMediaStateForIssue(issueId, wrapper);
-    });
-}
-
-function setUploadStatus(status, state, text) {
-  if (!status) return;
-  status.className = `upload-status ${state}`;
-  status.textContent = text;
-}
-
-function connectGoogleDrive() {
-  cloudStorage = {
-    ...cloudStorage,
-    provider: els.storageProvider.value,
-    driveClientId: els.driveClientId.value.trim(),
-    driveFolderId: els.driveFolderId.value.trim(),
-  };
-  storage.saveCloudStorage(cloudStorage);
-  ensureDriveToken(true)
-    .then(() => {
-      updateDriveStatus("Connected");
-      els.storageHint.textContent = storageHintText();
-    })
-    .catch((error) => updateDriveStatus(error.message));
-}
-
-async function testGoogleDriveUpload() {
-  try {
-    cloudStorage = {
-      ...cloudStorage,
-      provider: "gdrive",
-      driveClientId: els.driveClientId.value.trim(),
-      driveFolderId: els.driveFolderId.value.trim(),
-    };
-    storage.saveCloudStorage(cloudStorage);
-    const token = await ensureDriveToken(true);
-    const file = new Blob([`Reporter Drive test ${new Date().toISOString()}`], { type: "text/plain" });
-    const result = await uploadToGoogleDrive(file, timestampedName("reporter-drive-test", "txt"), "text/plain", token);
-    updateDriveStatus(`Uploaded ${result.name}`);
-  } catch (error) {
-    updateDriveStatus(error.message);
-  }
-}
-
-function syncIssueToDrive(issue) {
-  if (!issue || cloudStorage.provider !== "gdrive") return;
-  ensureDriveToken(false)
-    .then((token) => saveIssueJsonToDrive(issue, token))
-    .then(() => setDriveSyncStatus(`Saved Issue ${issue.id} text to Drive.`))
-    .catch((error) => setDriveSyncStatus(`Issue text kept local: ${error.message}`));
-}
-
-async function saveIssueJsonToDrive(issue, token) {
-  const folderId = await ensureIssueDriveFolder(token, issue.id);
-  const payload = {
-    schema: "reporter.issue.v1",
-    issue,
-    savedAt: new Date().toISOString(),
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const existing = await findDriveFile("issue.json", token, folderId, "application/json");
-  if (existing) {
-    return updateGoogleDriveFile(existing.id, blob, "application/json", token);
-  }
-  return uploadToGoogleDrive(blob, "issue.json", "application/json", token, folderId);
-}
-
-async function syncIssuesFromDrive() {
-  try {
-    setDriveSyncStatus("Scanning Drive issue folders...");
-    const token = await ensureDriveToken(false);
-    const folders = await listDriveIssueFolders(token);
-    const imported = [];
-    for (const folder of folders) {
-      const jsonFile = await findDriveFile("issue.json", token, folder.id, "application/json");
-      if (!jsonFile) continue;
-      const issue = await downloadIssueJson(jsonFile.id, token);
-      if (issue) imported.push(issue);
-    }
-    if (!imported.length) {
-      setDriveSyncStatus("No issue.json files found in Drive issue folders.");
-      return;
-    }
-    mergeImportedIssues(imported);
-    await storage.saveIssues(issues);
-    syncStatusOptions();
-    render();
-    setDriveSyncStatus(`Loaded ${imported.length} issue${imported.length === 1 ? "" : "s"} from Drive.`);
-  } catch (error) {
-    setDriveSyncStatus(`Drive sync failed: ${error.message}`);
-  }
-}
-
-function mergeImportedIssues(imported) {
-  const byId = new Map(issues.map((issue) => [issue.id, issue]));
-  imported.forEach((issue) => {
-    byId.set(issue.id, issue);
-    ensureReporter(issue.reporter);
-    if (issue.status && !statuses.includes(issue.status)) statuses.push(issue.status);
-  });
-  issues = [...byId.values()].sort((a, b) => b.id - a.id);
-  storage.saveStatuses(statuses);
-  storage.saveReporters(reporters);
-}
-
-async function listDriveIssueFolders(token) {
-  const parent = cloudStorage.driveFolderId ? `'${escapeDriveQuery(cloudStorage.driveFolderId)}' in parents and ` : "";
-  const query = `${parent}mimeType = 'application/vnd.google-apps.folder' and name contains 'Issue ' and trashed = false`;
-  const result = await driveJson(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,webViewLink)&pageSize=1000`,
-    token,
-  );
-  return result.files || [];
-}
-
-async function findDriveFile(name, token, folderId, mimeType = "") {
-  const parts = [
-    `'${escapeDriveQuery(folderId)}' in parents`,
-    `name = '${escapeDriveQuery(name)}'`,
-    "trashed = false",
-  ];
-  if (mimeType) parts.push(`mimeType = '${escapeDriveQuery(mimeType)}'`);
-  const result = await driveJson(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(parts.join(" and "))}&fields=files(id,name,modifiedTime)&pageSize=1`,
-    token,
-  );
-  return result.files?.[0] || null;
-}
-
-async function downloadIssueJson(fileId, token) {
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) return null;
-  const payload = await response.json().catch(() => null);
-  return normalizeImportedIssue(payload?.issue || payload);
-}
-
-function normalizeImportedIssue(issue) {
-  if (!issue || !issue.id || !issue.title) return null;
-  return {
-    id: Number(issue.id),
-    title: String(issue.title),
-    reporter: issue.reporter ? String(issue.reporter) : "",
-    status: issue.status ? String(issue.status) : "open",
-    description: issue.description ? String(issue.description) : "",
-    createdAt: issue.createdAt || new Date().toISOString(),
-    updatedAt: issue.updatedAt || new Date().toISOString(),
-  };
-}
-
-function setDriveSyncStatus(message) {
-  if (els.driveSyncStatus) els.driveSyncStatus.textContent = message;
-}
-
-function ensureDriveToken(forcePrompt) {
-  const tokenIsFresh = driveToken && Date.now() < driveTokenExpiresAt - 60000;
-  if (tokenIsFresh && !forcePrompt) {
-    return Promise.resolve(driveToken);
-  }
-  if (driveTokenRequest && !forcePrompt) {
-    return driveTokenRequest;
-  }
-  if (!forcePrompt && driveToken) {
-    driveToken = "";
-    driveTokenExpiresAt = 0;
-    updateDriveStatus("Reconnect Drive");
-    return Promise.reject(new Error("Drive session expired. Reconnect Drive in Settings."));
-  }
-  if (!forcePrompt && !driveToken) {
-    return Promise.reject(new Error("Connect Drive in Settings first."));
-  }
-  driveTokenRequest = new Promise((resolve, reject) => {
-    if (!cloudStorage.driveClientId) {
-      driveTokenRequest = null;
-      reject(new Error("Add a Google OAuth client ID first."));
-      return;
-    }
-    if (!window.google?.accounts?.oauth2) {
-      driveTokenRequest = null;
-      reject(new Error("Google sign-in library is still loading. Try again in a moment."));
-      return;
-    }
-    driveTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: cloudStorage.driveClientId,
-      scope: DRIVE_SCOPE,
-      callback: (response) => {
-        driveTokenRequest = null;
-        if (response?.access_token) {
-          driveToken = response.access_token;
-          driveTokenExpiresAt = Date.now() + Number(response.expires_in || 3600) * 1000;
-          resolve(driveToken);
-        } else {
-          reject(new Error(response?.error || "Drive authorization was cancelled."));
-        }
-      },
-    });
-    driveTokenClient.requestAccessToken({ prompt: forcePrompt ? "consent" : "" });
-  });
-  return driveTokenRequest;
-}
-
-async function ensureIssueDriveFolder(token, issueId) {
-  const title = els.issueTitle.value.trim();
-  const cacheKey = `${cloudStorage.driveFolderId || "root"}:${issueId}`;
-  if (driveFolders[cacheKey]) return driveFolders[cacheKey];
-  const folderName = `Issue ${issueId}${title ? ` - ${safeDriveName(title)}` : ""}`;
-  const folder = await createGoogleDriveFolder(folderName, token, cloudStorage.driveFolderId);
-  driveFolders[cacheKey] = folder.id;
-  storage.saveDriveFolders(driveFolders);
-  return folder.id;
-}
-
-async function persistMediaStateForIssue(issueId, wrapper) {
-  const issue = issues.find((item) => item.id === issueId);
-  if (!issue) return;
-  const sameOpenIssue = els.issueDialog.open && (draftIssueId === issueId || editingId === issueId);
-  const sameClosedDraft = !els.issueDialog.open && els.issueDescription.contains(wrapper);
-  if (!sameOpenIssue && !sameClosedDraft) return;
-  issue.description = sanitizeEditorHtml(els.issueDescription.innerHTML);
-  issue.updatedAt = new Date().toISOString();
-  await storage.saveIssues(issues);
-  syncIssueToDrive(issue);
-  render();
-}
-
-async function createGoogleDriveFolder(name, token, parentId = "") {
-  const metadata = {
-    name,
-    mimeType: "application/vnd.google-apps.folder",
-  };
-  if (parentId) metadata.parents = [parentId];
-  const response = await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=UTF-8",
-    },
-    body: JSON.stringify(metadata),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error?.message || `Drive folder failed (${response.status})`);
-  }
-  return result;
-}
-
-async function uploadToGoogleDrive(blob, name, type, token, folderId = "") {
-  const boundary = `reporter_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const metadata = { name };
-  if (folderId || cloudStorage.driveFolderId) metadata.parents = [folderId || cloudStorage.driveFolderId];
-  const body = new Blob(
-    [
-      `--${boundary}\r\n`,
-      "Content-Type: application/json; charset=UTF-8\r\n\r\n",
-      JSON.stringify(metadata),
-      "\r\n",
-      `--${boundary}\r\n`,
-      `Content-Type: ${type}\r\n\r\n`,
-      blob,
-      "\r\n",
-      `--${boundary}--`,
-    ],
-    { type: `multipart/related; boundary=${boundary}` },
-  );
-  const response = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    },
-  );
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error?.message || `Drive upload failed (${response.status})`);
-  }
-  return result;
-}
-
-async function updateGoogleDriveFile(fileId, blob, type, token) {
-  const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": type,
-    },
-    body: blob,
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error?.message || `Drive update failed (${response.status})`);
-  }
-  return result;
-}
-
-async function driveJson(url, token) {
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error?.message || `Drive request failed (${response.status})`);
-  }
-  return result;
-}
-
-function updateDriveStatus(message = "") {
-  if (!els.driveStatus) return;
-  if (message) {
-    els.driveStatus.textContent = message;
-    return;
-  }
-  if (cloudStorage.provider !== "gdrive") {
-    els.driveStatus.textContent = "Not connected";
-  } else if (driveToken) {
-    els.driveStatus.textContent = "Connected";
-  } else if (cloudStorage.driveClientId) {
-    els.driveStatus.textContent = "Ready to connect";
-  } else {
-    els.driveStatus.textContent = "Add client ID";
-  }
-}
-
 function timestampedName(prefix, extension) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `${prefix}-${stamp}.${extension}`;
 }
 
-function safeDriveName(name) {
-  return name.replace(/[\\/:*?"<>|#{}%~&]/g, " ").replace(/\s+/g, " ").trim().slice(0, 90);
-}
-
-function escapeDriveQuery(value) {
-  return String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
-async function hydrateFromServer() {
-  try {
-    const data = await apiJson("/api/bootstrap");
-    if (Array.isArray(data.issues) && data.issues.length) {
-      issues = data.issues;
-      await storage.saveIssues(issues);
-    }
-    if (Array.isArray(data.statuses) && data.statuses.length) {
-      statuses = data.statuses;
-      storage.saveStatuses(statuses);
-    }
-    if (Array.isArray(data.reporters) && data.reporters.length) {
-      reporters = data.reporters;
-      storage.saveReporters(reporters);
-    }
-    if (data.cloudStorage) {
-      cloudStorage = { ...cloudStorage, ...data.cloudStorage };
-      storage.saveCloudStorage(cloudStorage);
-    }
-  } catch {
-    // Static file mode: keep the browser-only storage path.
-  }
-}
-
-async function saveIssuesToServer() {
-  try {
-    await apiJson("/api/issues/bulk", { method: "POST", body: { issues } });
-  } catch {
-    // Local fallback remains the source when the server is not running.
-  }
-}
-
-async function saveNamedListToServer(kind, items) {
-  try {
-    await apiJson(`/api/${kind}`, { method: "POST", body: { items } });
-  } catch {
-    // Server sync is optional in static mode.
-  }
-}
-
-async function saveCloudStorageToServer() {
-  try {
-    await apiJson("/api/settings/cloud-storage", { method: "POST", body: publicCloudStorageForServer(cloudStorage) });
-  } catch {
-    // Protected server settings require a login; browser fallback already saved locally.
-  }
-}
-
-async function apiJson(path, options = {}) {
-  const init = {
-    method: options.method || "GET",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-  };
-  if (options.body) init.body = JSON.stringify(options.body);
-  const response = await fetch(`${API_BASE}${path}`, init);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-  return data;
-}
-
-function publicCloudStorageForServer(config) {
-  const safe = { ...config };
-  delete safe.megaPassword;
-  return safe;
-}
-
 function formatDuration(milliseconds) {
   const seconds = Math.floor(milliseconds / 1000);
-  const mins = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const secs = String(seconds % 60).padStart(2, "0");
-  return `${mins}:${secs}`;
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
-
-init();
