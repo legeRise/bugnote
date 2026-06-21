@@ -9,6 +9,7 @@ import mimetypes
 import os
 import re
 import shutil
+import socket
 import threading
 import time
 import urllib.parse
@@ -91,6 +92,11 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/":
             return str(ROOT / "index.html")
         return str(ROOT / path.lstrip("/"))
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Permissions-Policy", "camera=(self), microphone=(self)")
+        super().end_headers()
 
     def do_GET(self):
         if self.api_path == "/api/issues":
@@ -200,11 +206,38 @@ class Handler(SimpleHTTPRequestHandler):
         )
 
 
+def local_ip_addresses():
+    addresses = set()
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            address = info[4][0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            address = probe.getsockname()[0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+    return sorted(addresses)
+
+
 if __name__ == "__main__":
     ensure_dirs()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "9201"))
     print(f"Reporter on http://{host}:{port}")
+    for address in local_ip_addresses():
+        print(f"Mobile/LAN: http://{address}:{port}")
     print(f"Issues: {ISSUES_DIR}")
     print(f"Media:  {MEDIA_DIR}")
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    try:
+        ThreadingHTTPServer((host, port), Handler).serve_forever()
+    except KeyboardInterrupt:
+        print("\nReporter stopped")

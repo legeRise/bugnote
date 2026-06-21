@@ -18,6 +18,15 @@
   box-sizing: border-box;
 }
 
+html {
+  min-width: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100%;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -93,6 +102,7 @@ select {
 .main {
   padding: 26px clamp(18px, 3vw, 38px);
   min-width: 0;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -340,6 +350,10 @@ dialog::backdrop {
   margin-bottom: 18px;
 }
 
+.dialog-head > div {
+  min-width: 0;
+}
+
 .icon-button {
   width: 38px;
   height: 38px;
@@ -369,6 +383,7 @@ dialog::backdrop {
 .editor-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--line);
@@ -533,8 +548,13 @@ dialog::backdrop {
 .camera-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
+}
+
+.camera-actions > button {
+  flex: 0 1 auto;
 }
 
 .recording-status {
@@ -671,6 +691,7 @@ button:disabled {
 
   .topbar {
     gap: 12px;
+    align-items: flex-start;
   }
 
   h1 {
@@ -717,11 +738,22 @@ button:disabled {
   .camera-panel {
     min-height: 100dvh;
     padding: 12px;
+    display: flex;
+    flex-direction: column;
   }
 
   .dialog-head {
     gap: 10px;
     margin-bottom: 12px;
+  }
+
+  .dialog-head h2 {
+    font-size: 21px;
+    line-height: 1.15;
+  }
+
+  .dialog-head p {
+    font-size: 13px;
   }
 
   .editor-toolbar {
@@ -824,7 +856,8 @@ button:disabled {
 
   .camera-panel video {
     aspect-ratio: 4 / 3;
-    max-height: 55dvh;
+    max-height: min(55dvh, 460px);
+    object-fit: cover;
   }
 
   .camera-dialog .dialog-head {
@@ -835,9 +868,37 @@ button:disabled {
     padding-bottom: 8px;
   }
 
+  .camera-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
   .primary-button,
   .secondary-button,
   .ghost-button {
     width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .main {
+    padding-inline: 8px;
+  }
+
+  .stats-grid {
+    gap: 8px;
+  }
+
+  .stat {
+    min-width: 0;
+  }
+
+  td {
+    grid-template-columns: 78px 1fr;
+    gap: 8px;
+  }
+
+  .camera-actions {
+    grid-template-columns: 1fr;
   }
 }

@@ -33,6 +33,7 @@ const els = {
   cameraDialog: document.querySelector("#cameraDialog"),
   closeCamera: document.querySelector("#closeCamera"),
   cameraPreview: document.querySelector("#cameraPreview"),
+  switchCamera: document.querySelector("#switchCamera"),
   capturePhoto: document.querySelector("#capturePhoto"),
   pauseVideo: document.querySelector("#pauseVideo"),
   recordVideo: document.querySelector("#recordVideo"),
@@ -53,6 +54,9 @@ let recordingStartedAt = 0;
 let pausedDurationMs = 0;
 let pauseStartedAt = 0;
 let timerId = null;
+let preferredFacingMode = "environment";
+let selectedVideoDeviceId = "";
+let videoInputDevices = [];
 
 init();
 
@@ -82,6 +86,7 @@ function bindEvents() {
   els.issueDescription.addEventListener("dragover", (event) => event.preventDefault());
   els.openCamera.addEventListener("click", openCameraDialog);
   els.closeCamera.addEventListener("click", closeCameraDialog);
+  els.switchCamera.addEventListener("click", switchCamera);
   els.capturePhoto.addEventListener("click", capturePhoto);
   els.recordVideo.addEventListener("click", toggleRecording);
   els.pauseVideo.addEventListener("click", togglePauseRecording);
@@ -391,26 +396,95 @@ function saveSelectionFromPoint(x, y) {
 
 async function openCameraDialog() {
   saveSelection();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showError("Camera access is unavailable in this browser. Use upload or paste instead.");
+    return;
+  }
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    els.cameraPreview.srcObject = cameraStream;
-    await els.cameraPreview.play();
     resetRecordingUi();
     els.cameraDialog.showModal();
+    await startCameraStream();
+    resetRecordingUi();
   } catch {
+    if (els.cameraDialog.open) els.cameraDialog.close();
     showError("Camera access is unavailable. Use upload or paste instead.");
   }
 }
 
 function closeCameraDialog() {
   stopRecording(false);
-  if (cameraStream) {
-    cameraStream.getTracks().forEach((track) => track.stop());
-    cameraStream = null;
-  }
+  stopCameraStream();
   els.cameraPreview.srcObject = null;
   resetRecordingUi();
   els.cameraDialog.close();
+}
+
+async function startCameraStream() {
+  stopCameraStream();
+  const constraints = cameraConstraints();
+  cameraStream = await navigator.mediaDevices.getUserMedia(constraints).catch((error) => {
+    if (!constraints.audio) throw error;
+    return navigator.mediaDevices.getUserMedia({ ...constraints, audio: false });
+  });
+  els.cameraPreview.srcObject = cameraStream;
+  await els.cameraPreview.play();
+  await refreshVideoInputs();
+  syncCameraSwitchUi();
+}
+
+function stopCameraStream() {
+  if (!cameraStream) return;
+  cameraStream.getTracks().forEach((track) => track.stop());
+  cameraStream = null;
+}
+
+function cameraConstraints() {
+  const video = selectedVideoDeviceId
+    ? { deviceId: { exact: selectedVideoDeviceId } }
+    : { facingMode: { ideal: preferredFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } };
+  return { video, audio: { echoCancellation: true, noiseSuppression: true } };
+}
+
+async function refreshVideoInputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  videoInputDevices = devices.filter((device) => device.kind === "videoinput");
+  const activeTrack = cameraStream?.getVideoTracks()[0];
+  const activeDeviceId = activeTrack?.getSettings?.().deviceId;
+  if (activeDeviceId) selectedVideoDeviceId = activeDeviceId;
+}
+
+async function switchCamera() {
+  if (!cameraStream || mediaRecorder) return;
+  const activeTrack = cameraStream.getVideoTracks()[0];
+  const activeDeviceId = activeTrack?.getSettings?.().deviceId || selectedVideoDeviceId;
+
+  if (videoInputDevices.length > 1 && activeDeviceId) {
+    const activeIndex = videoInputDevices.findIndex((device) => device.deviceId === activeDeviceId);
+    const nextIndex = activeIndex >= 0 ? (activeIndex + 1) % videoInputDevices.length : 0;
+    selectedVideoDeviceId = videoInputDevices[nextIndex].deviceId;
+  } else {
+    selectedVideoDeviceId = "";
+    preferredFacingMode = preferredFacingMode === "environment" ? "user" : "environment";
+  }
+
+  els.switchCamera.disabled = true;
+  try {
+    await startCameraStream();
+  } catch {
+    selectedVideoDeviceId = "";
+    preferredFacingMode = preferredFacingMode === "environment" ? "user" : "environment";
+    await startCameraStream();
+  } finally {
+    syncCameraSwitchUi();
+  }
+}
+
+function syncCameraSwitchUi() {
+  const canSwitch = videoInputDevices.length > 1 || !selectedVideoDeviceId;
+  els.switchCamera.disabled = !canSwitch || !!mediaRecorder;
+  const facingLabel = preferredFacingMode === "environment" ? "Front Camera" : "Back Camera";
+  els.switchCamera.textContent = videoInputDevices.length > 1 ? "Switch Camera" : `Use ${facingLabel}`;
 }
 
 function capturePhoto() {
@@ -488,6 +562,7 @@ function applyRecordingUi(state) {
   els.pauseVideo.textContent = state === "paused" ? "Resume" : "Pause";
   els.pauseVideo.disabled = false;
   els.capturePhoto.disabled = true;
+  els.switchCamera.disabled = true;
   updateTimer();
   timerId = setInterval(updateTimer, 500);
 }
@@ -508,6 +583,7 @@ function resetRecordingUi() {
   els.pauseVideo.textContent = "Pause";
   els.pauseVideo.disabled = true;
   els.capturePhoto.disabled = false;
+  syncCameraSwitchUi();
 }
 
 function updateTimer() {
