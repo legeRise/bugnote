@@ -203,7 +203,7 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     ensure_dirs()
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "9203"))
+    port = int(os.environ.get("PORT", "9201"))
     print(f"Reporter on http://{host}:{port}")
     print(f"Issues: {ISSUES_DIR}")
     print(f"Media:  {MEDIA_DIR}")

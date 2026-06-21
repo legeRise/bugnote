@@ -9,7 +9,7 @@ The server (`server.py`) uses only the Python standard library — mainly `http.
 
 The goal is to keep setup simple. Most servers already have Python 3 installed, so BugNote can be copied to a machine and run without installing extra packages, creating a virtual environment, or running a build step.
 
-By default, the server runs on host `0.0.0.0` and port `9203`. Both can be changed with environment variables:
+By default, the server runs on host `0.0.0.0` and port `9201`. Both can be changed with environment variables:
 
 ```bash
 HOST=127.0.0.1 PORT=8000 python3 server.py
@@ -51,7 +51,7 @@ python3 server.py
 Then open:
 
 ```text
-http://127.0.0.1:9203
+http://127.0.0.1:9201
 ```
 
 ## Backups
