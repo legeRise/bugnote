@@ -27,6 +27,7 @@ FILE_LOCK = threading.Lock()
 
 DEFAULT_SETTINGS = {
     "reporters": ["Habib"],
+    "assignees": ["Habib"],
     "tags": [],
     "statuses": ["open", "fixed", "closed but not fixed", "not doing"],
 }
@@ -92,9 +93,11 @@ def read_settings():
     try:
         saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         if isinstance(saved, dict):
+            saved_reporters = clean_list(saved.get("reporters", []))
             settings.update(
                 {
-                    "reporters": clean_list(saved.get("reporters", [])),
+                    "reporters": saved_reporters,
+                    "assignees": clean_list(saved.get("assignees", saved_reporters)),
                     "tags": clean_tags(saved.get("tags", [])),
                     "statuses": clean_list(saved.get("statuses", [])),
                 }
@@ -103,6 +106,7 @@ def read_settings():
         pass
     return {
         "reporters": clean_list([*DEFAULT_SETTINGS["reporters"], *settings.get("reporters", [])]) or DEFAULT_SETTINGS["reporters"],
+        "assignees": clean_list(settings.get("assignees", [])),
         "tags": clean_tags(settings.get("tags", [])),
         "statuses": clean_list([*DEFAULT_SETTINGS["statuses"], *settings.get("statuses", [])]) or DEFAULT_SETTINGS["statuses"],
     }
@@ -111,6 +115,7 @@ def read_settings():
 def write_settings(settings):
     next_settings = {
         "reporters": clean_list(settings.get("reporters", [])) or DEFAULT_SETTINGS["reporters"],
+        "assignees": clean_list(settings.get("assignees", [])),
         "tags": clean_tags(settings.get("tags", [])),
         "statuses": clean_list(settings.get("statuses", [])) or DEFAULT_SETTINGS["statuses"],
     }

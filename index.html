@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Reporter</title>
+    <title>BugNote</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -60,7 +60,7 @@
               <input
                 id="searchInput"
                 type="search"
-                placeholder="Search issue #, title, text, reporter, assignee, status, tag, or date"
+                placeholder="Search or filter: reporter:habib assignee:marco tag:bug status:open"
                 autocomplete="off"
               />
             </div>
@@ -97,7 +97,7 @@
           <header class="topbar">
             <div>
               <h1>Settings</h1>
-              <p>Manage reporters, tags, and workflow statuses.</p>
+              <p>Manage reporters, assignees, tags, and workflow statuses.</p>
             </div>
           </header>
 
@@ -112,6 +112,18 @@
                 <button class="secondary-button" type="submit">Add</button>
               </form>
               <div class="settings-list" id="reporterSettingsList"></div>
+            </article>
+
+            <article class="settings-panel">
+              <h2>Assignees</h2>
+              <form class="add-row" data-setting-form="assignees">
+                <div class="field">
+                  <label for="newAssigneeSetting">Assignee name</label>
+                  <input id="newAssigneeSetting" type="text" maxlength="80" placeholder="Add assignee" autocomplete="off" />
+                </div>
+                <button class="secondary-button" type="submit">Add</button>
+              </form>
+              <div class="settings-list" id="assigneeSettingsList"></div>
             </article>
 
             <article class="settings-panel">
@@ -205,6 +217,7 @@
             data-placeholder="Describe the problem. Paste, upload, or capture media at the cursor..."
           ></div>
           <p class="hint" id="storageHint">Media files are saved in this project folder.</p>
+          <div class="upload-status" id="uploadStatus" hidden>Ready</div>
         </div>
 
         <div class="dialog-actions">

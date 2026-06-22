@@ -441,7 +441,7 @@ dialog::backdrop {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -644,6 +644,10 @@ dialog::backdrop {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.upload-status[hidden] {
+  display: none !important;
 }
 
 .upload-status::before {

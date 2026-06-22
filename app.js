@@ -1,5 +1,6 @@
 const defaultStatuses = ["open", "fixed", "closed but not fixed", "not doing"];
 const defaultReporters = ["Habib"];
+const defaultAssignees = [];
 const defaultTags = [];
 
 const els = {
@@ -14,6 +15,7 @@ const els = {
   emptyState: document.querySelector("#emptyState"),
   openCreateIssue: document.querySelector("#openCreateIssue"),
   reporterSettingsList: document.querySelector("#reporterSettingsList"),
+  assigneeSettingsList: document.querySelector("#assigneeSettingsList"),
   tagSettingsList: document.querySelector("#tagSettingsList"),
   statusSettingsList: document.querySelector("#statusSettingsList"),
   settingForms: document.querySelectorAll("[data-setting-form]"),
@@ -30,6 +32,7 @@ const els = {
   issueTagPicker: document.querySelector("#issueTagPicker"),
   issueDescription: document.querySelector("#issueDescription"),
   storageHint: document.querySelector("#storageHint"),
+  uploadStatus: document.querySelector("#uploadStatus"),
   mediaUpload: document.querySelector("#mediaUpload"),
   closeDialog: document.querySelector("#closeDialog"),
   cancelIssue: document.querySelector("#cancelIssue"),
@@ -53,6 +56,7 @@ const els = {
 let issues = [];
 let settings = {
   reporters: [...defaultReporters],
+  assignees: [...defaultAssignees],
   tags: [...defaultTags],
   statuses: [...defaultStatuses],
 };
@@ -63,6 +67,7 @@ let cameraStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let shouldSaveRecording = false;
+let recordingStopping = false;
 let recordingStartedAt = 0;
 let pausedDurationMs = 0;
 let pauseStartedAt = 0;
@@ -70,11 +75,14 @@ let timerId = null;
 let preferredFacingMode = "environment";
 let selectedVideoDeviceId = "";
 let videoInputDevices = [];
+let busyCount = 0;
+let busyMessage = "";
 
 init();
 
 async function init() {
   await Promise.all([loadIssues(), loadSettings()]);
+  normalizePeopleReferences();
   bindEvents();
   render();
 }
@@ -129,6 +137,7 @@ function render() {
   renderStats();
   renderIssues();
   renderSettings();
+  syncBusyUi();
 }
 
 function switchView(view) {
@@ -138,6 +147,7 @@ function switchView(view) {
 
 function renderSettings() {
   renderSettingsList(els.reporterSettingsList, "reporters", sortedReporters());
+  renderSettingsList(els.assigneeSettingsList, "assignees", sortedAssignees());
   renderSettingsList(els.tagSettingsList, "tags", sortedTagLabels(), true);
   renderSettingsList(els.statusSettingsList, "statuses", sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]));
 }
@@ -175,7 +185,8 @@ function renderSettingsList(container, type, values, useChips = false) {
     button.className = "quiet-button";
     button.type = "button";
     button.textContent = "Remove";
-    button.disabled = isProtectedSetting(type, value);
+    button.dataset.protected = String(isProtectedSetting(type, value));
+    button.disabled = button.dataset.protected === "true";
     button.addEventListener("click", () => removeSettingItem(type, value));
     row.appendChild(button);
     container.appendChild(row);
@@ -215,15 +226,23 @@ async function updateTagColor(label, color) {
 }
 
 async function saveSettings() {
-  const result = await apiJson("/api/settings", { method: "POST", body: settings });
-  settings = normalizeSettings(result.settings || settings);
-  render();
+  try {
+    await withBusy("Saving settings...", async () => {
+      const result = await apiJson("/api/settings", { method: "POST", body: settings });
+      settings = normalizeSettings(result.settings || settings);
+      normalizePeopleReferences();
+      render();
+    });
+  } catch (error) {
+    showError(error.message || "Settings could not be saved.");
+  }
 }
 
 function isProtectedSetting(type, value) {
   if (type === "tags") return !settings.tags.some((tag) => tag.label === value);
   if (!settings[type]?.includes(value)) return true;
   if (type === "reporters") return defaultReporters.includes(value);
+  if (type === "assignees") return defaultAssignees.includes(value);
   if (type === "statuses") return defaultStatuses.includes(value);
   return false;
 }
@@ -264,9 +283,8 @@ function issueTagLabel(tag) {
 }
 
 function renderIssues() {
-  const query = normalizeSearchText(els.searchInput.value);
-  const terms = query.split(" ").filter(Boolean);
-  const filtered = issues.filter((issue) => !terms.length || terms.every((term) => issueSearchText(issue).includes(term)));
+  const query = parseIssueQuery(els.searchInput.value);
+  const filtered = issues.filter((issue) => issueMatchesQuery(issue, query));
 
   els.issuesTable.innerHTML = "";
   filtered.forEach((issue) => {
@@ -296,6 +314,53 @@ function renderIssues() {
   els.issuesTable.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => openIssueDialog(Number(button.dataset.edit)));
   });
+}
+
+function parseIssueQuery(value) {
+  const tokens = String(value || "").match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+  const filters = [];
+  const terms = [];
+  tokens.forEach((token) => {
+    const cleanToken = token.replace(/^"|"$/g, "");
+    const match = cleanToken.match(/^([a-z]+):(.*)$/i);
+    const filterValue = match ? match[2].replace(/^"|"$/g, "") : "";
+    if (match && filterValue) {
+      filters.push({ key: match[1].toLowerCase(), value: normalizeSearchText(filterValue) });
+    } else if (cleanToken) {
+      terms.push(normalizeSearchText(cleanToken));
+    }
+  });
+  return { terms: terms.filter(Boolean), filters };
+}
+
+function issueMatchesQuery(issue, query) {
+  const searchText = issueSearchText(issue);
+  return query.terms.every((term) => searchText.includes(term)) && query.filters.every((filter) => issueMatchesFilter(issue, filter));
+}
+
+function issueMatchesFilter(issue, filter) {
+  const tags = Array.isArray(issue.tags) ? issue.tags : [];
+  const fields = {
+    reporter: issue.reporter,
+    author: issue.reporter,
+    assignee: issue.assignedTo,
+    assigned: issue.assignedTo,
+    assignedto: issue.assignedTo,
+    status: issue.status,
+    tag: tags.join(" "),
+    title: issue.title,
+    description: stripHtml(issue.descriptionHtml),
+    text: stripHtml(issue.descriptionHtml),
+    number: issue.number || String(issue.id).padStart(4, "0"),
+    id: String(issue.id),
+    created: `${issue.createdAt} ${formatDate(issue.createdAt)} ${compactDateParts(issue.createdAt)}`,
+    updated: `${issue.updatedAt} ${formatDate(issue.updatedAt)} ${compactDateParts(issue.updatedAt)}`,
+    date: `${issue.createdAt} ${issue.updatedAt} ${formatDate(issue.createdAt)} ${formatDate(issue.updatedAt)} ${compactDateParts(issue.createdAt)} ${compactDateParts(issue.updatedAt)}`,
+  };
+  if (filter.key === "tag") return tags.some((tag) => normalizeSearchText(tag).includes(filter.value));
+  if (filter.key === "is") return normalizeSearchText(issue.status).includes(filter.value);
+  const value = fields[filter.key];
+  return typeof value === "string" ? normalizeSearchText(value).includes(filter.value) : false;
 }
 
 function renderChipGroup(container, tags) {
@@ -364,9 +429,10 @@ function compactDateParts(date) {
 function syncOptions() {
   const statuses = sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]);
   const reporters = sortedReporters();
+  const assignees = sortedAssignees();
   fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), els.issueStatus.value || "open");
   fillSelect(els.reporterName, [...reporters.map((name) => [name, name]), ["__new__", "New reporter"]], els.reporterName.value);
-  fillSelect(els.assignedTo, [["", "Unassigned"], ...reporters.map((name) => [name, name])], els.assignedTo.value);
+  fillSelect(els.assignedTo, [["", "Unassigned"], ...assignees.map((name) => [name, name])], els.assignedTo.value);
 }
 
 function renderIssueTagPicker(selectedTags = []) {
@@ -438,6 +504,7 @@ async function openIssueDialog(id = null) {
 }
 
 function closeIssueDialog() {
+  if (isBusy() || isRecording()) return;
   els.issueDialog.close();
   editingId = null;
   draftIssueId = null;
@@ -446,9 +513,10 @@ function closeIssueDialog() {
 
 async function saveIssue(event) {
   event.preventDefault();
+  if (isBusy() || isRecording()) return;
   const title = els.issueTitle.value.trim();
   const reporter = resolveReporter();
-  const assignedTo = els.assignedTo.value;
+  const assignedTo = canonicalPersonName(els.assignedTo.value, sortedAssignees());
   const status = els.issueStatus.value;
   const tags = selectedIssueTags();
   const descriptionHtml = sanitizeEditorHtml(els.issueDescription.innerHTML);
@@ -458,30 +526,44 @@ async function saveIssue(event) {
   if (!reporter) return showError("Reporter is required.");
   if (!stripHtml(descriptionHtml) && !media.length) return showError("Description or media is required.");
 
-  const payload = { id: draftIssueId || editingId, title, reporter, assignedTo, status, tags, descriptionHtml, media };
-  const result = await apiJson("/api/issues", { method: "POST", body: payload });
-  const saved = result.issue;
-  const existingIndex = issues.findIndex((issue) => issue.id === saved.id);
-  if (existingIndex >= 0) {
-    issues[existingIndex] = saved;
-  } else {
-    issues.unshift(saved);
+  try {
+    await withBusy("Saving issue...", async () => {
+      const payload = { id: draftIssueId || editingId, title, reporter, assignedTo, status, tags, descriptionHtml, media };
+      const result = await apiJson("/api/issues", { method: "POST", body: payload });
+      const saved = normalizeIssue(result.issue);
+      const existingIndex = issues.findIndex((issue) => issue.id === saved.id);
+      if (existingIndex >= 0) {
+        issues[existingIndex] = saved;
+      } else {
+        issues.unshift(saved);
+      }
+      if (!hasCaseInsensitive(settings.reporters, reporter)) {
+        settings.reporters = sortedValues([...settings.reporters, reporter]);
+        const resultSettings = await apiJson("/api/settings", { method: "POST", body: settings });
+        settings = normalizeSettings(resultSettings.settings || settings);
+      }
+    });
+    closeIssueDialog();
+    render();
+  } catch (error) {
+    showError(error.message || "Issue could not be saved.");
   }
-  if (!settings.reporters.includes(reporter)) {
-    settings.reporters = sortedValues([...settings.reporters, reporter]);
-    await saveSettings();
-  }
-  closeIssueDialog();
-  render();
 }
 
 async function deleteCurrentIssue() {
   if (!editingId) return;
+  if (isBusy() || isRecording()) return;
   if (!confirm(`Delete issue #${String(editingId).padStart(4, "0")} and its media folder?`)) return;
-  await apiJson(`/api/issues/${editingId}`, { method: "DELETE" });
-  issues = issues.filter((issue) => issue.id !== editingId);
-  closeIssueDialog();
-  render();
+  try {
+    await withBusy("Deleting issue...", async () => {
+      await apiJson(`/api/issues/${editingId}`, { method: "DELETE" });
+      issues = issues.filter((issue) => issue.id !== editingId);
+    });
+    closeIssueDialog();
+    render();
+  } catch (error) {
+    showError(error.message || "Issue could not be deleted.");
+  }
 }
 
 function showError(message) {
@@ -502,6 +584,12 @@ function sortedReporters() {
   return sortedValues([
     ...settings.reporters,
     ...issues.map((issue) => issue.reporter).filter(Boolean),
+  ]);
+}
+
+function sortedAssignees() {
+  return sortedValues([
+    ...settings.assignees,
     ...issues.map((issue) => issue.assignedTo).filter(Boolean),
   ]);
 }
@@ -521,15 +609,50 @@ function sortedTagObjects(tags) {
 }
 
 function sortedValues(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const byKey = new Map();
+  values.forEach((value) => {
+    const cleanValue = normalizeName(String(value || ""));
+    const key = cleanValue.toLowerCase();
+    if (cleanValue && !byKey.has(key)) byKey.set(key, cleanValue);
+  });
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeSettings(data = {}) {
+  const savedReporters = Array.isArray(data.reporters) ? data.reporters : [];
+  const savedAssignees = Array.isArray(data.assignees) ? data.assignees : savedReporters;
   return {
-    reporters: sortedValues([...defaultReporters, ...(Array.isArray(data.reporters) ? data.reporters : [])]),
+    reporters: sortedValues([...defaultReporters, ...savedReporters]),
+    assignees: sortedValues([...defaultAssignees, ...savedAssignees]),
     tags: sortedTagObjects([...(Array.isArray(data.tags) ? data.tags : defaultTags)].map(normalizeTag)),
     statuses: sortedValues([...defaultStatuses, ...(Array.isArray(data.statuses) ? data.statuses : [])]),
   };
+}
+
+function normalizePeopleReferences() {
+  const reporterNames = sortedValues([...settings.reporters, ...issues.map((issue) => issue.reporter).filter(Boolean)]);
+  const assigneeNames = sortedValues([
+    ...settings.assignees,
+    ...issues.map((issue) => issue.assignedTo).filter(Boolean),
+  ]);
+  settings.reporters = sortedValues([...settings.reporters, ...reporterNames]);
+  settings.assignees = sortedValues([...settings.assignees, ...assigneeNames]);
+  issues = issues.map((issue) => ({
+    ...issue,
+    reporter: canonicalPersonName(issue.reporter, reporterNames),
+    assignedTo: canonicalPersonName(issue.assignedTo, assigneeNames),
+  }));
+}
+
+function canonicalPersonName(value, names) {
+  const cleanValue = normalizeName(value || "");
+  if (!cleanValue) return "";
+  return names.find((name) => name.toLowerCase() === cleanValue.toLowerCase()) || cleanValue;
+}
+
+function hasCaseInsensitive(values, value) {
+  const key = normalizeName(value || "").toLowerCase();
+  return !!key && values.some((item) => item.toLowerCase() === key);
 }
 
 function normalizeTag(tag) {
@@ -568,15 +691,24 @@ function readableTextColor(hex) {
 }
 
 async function handleUpload(event) {
-  await insertFiles([...event.target.files]);
-  event.target.value = "";
+  try {
+    await insertFiles([...event.target.files]);
+  } catch (error) {
+    showError(error.message || "Media could not be uploaded.");
+  } finally {
+    event.target.value = "";
+  }
 }
 
 async function handlePaste(event) {
   const files = [...event.clipboardData.files].filter(isSupportedMedia);
   if (!files.length) return;
   event.preventDefault();
-  await insertFiles(files);
+  try {
+    await insertFiles(files);
+  } catch (error) {
+    showError(error.message || "Pasted media could not be uploaded.");
+  }
 }
 
 async function handleDrop(event) {
@@ -584,18 +716,24 @@ async function handleDrop(event) {
   if (!files.length) return;
   event.preventDefault();
   saveSelectionFromPoint(event.clientX, event.clientY);
-  await insertFiles(files);
+  try {
+    await insertFiles(files);
+  } catch (error) {
+    showError(error.message || "Dropped media could not be uploaded.");
+  }
 }
 
 async function insertFiles(files) {
   const mediaFiles = files.filter(isSupportedMedia);
   if (!mediaFiles.length) return;
-  restoreSelection();
-  for (const file of mediaFiles) {
-    const asset = await uploadMedia(file, file.name, normalizeMediaType(file.type, file.name));
-    insertMedia(asset.url, asset.type, asset.name, asset.path);
-  }
-  saveSelection();
+  await withBusy(`Uploading ${mediaFiles.length} media file${mediaFiles.length === 1 ? "" : "s"}...`, async () => {
+    restoreSelection();
+    for (const file of mediaFiles) {
+      const asset = await uploadMedia(file, file.name, normalizeMediaType(file.type, file.name));
+      insertMedia(asset.url, asset.type, asset.name, asset.path);
+    }
+    saveSelection();
+  });
 }
 
 async function uploadMedia(blob, name, type) {
@@ -692,6 +830,7 @@ function saveSelectionFromPoint(x, y) {
 }
 
 async function openCameraDialog() {
+  if (isBusy()) return;
   saveSelection();
   if (!navigator.mediaDevices?.getUserMedia) {
     showError("Camera access is unavailable in this browser. Use upload or paste instead.");
@@ -709,6 +848,11 @@ async function openCameraDialog() {
 }
 
 function closeCameraDialog() {
+  if (isBusy()) return;
+  closeCameraDialogNow();
+}
+
+function closeCameraDialogNow() {
   stopRecording(false);
   stopCameraStream();
   els.cameraPreview.srcObject = null;
@@ -752,7 +896,7 @@ async function refreshVideoInputs() {
 }
 
 async function switchCamera() {
-  if (!cameraStream || mediaRecorder) return;
+  if (!cameraStream || mediaRecorder || isBusy()) return;
   const activeTrack = cameraStream.getVideoTracks()[0];
   const activeDeviceId = activeTrack?.getSettings?.().deviceId || selectedVideoDeviceId;
 
@@ -779,28 +923,31 @@ async function switchCamera() {
 
 function syncCameraSwitchUi() {
   const canSwitch = videoInputDevices.length > 1 || !selectedVideoDeviceId;
-  els.switchCamera.disabled = !canSwitch || !!mediaRecorder;
+  els.switchCamera.disabled = !canSwitch || !!mediaRecorder || isBusy();
   const facingLabel = preferredFacingMode === "environment" ? "Front Camera" : "Back Camera";
   els.switchCamera.textContent = videoInputDevices.length > 1 ? "Switch Camera" : `Use ${facingLabel}`;
 }
 
 function capturePhoto() {
-  if (!cameraStream) return;
+  if (!cameraStream || isBusy()) return;
   const canvas = document.createElement("canvas");
   const video = els.cameraPreview;
   canvas.width = video.videoWidth || 1280;
   canvas.height = video.videoHeight || 720;
   canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-  canvas.toBlob(async (blob) => {
+  canvas.toBlob((blob) => {
     if (!blob) return;
-    const name = timestampedName("photo", "png");
-    const asset = await uploadMedia(blob, name, "image/png");
-    insertMedia(asset.url, asset.type, asset.name, asset.path);
-    closeCameraDialog();
+    withBusy("Saving photo...", async () => {
+      const name = timestampedName("photo", "png");
+      const asset = await uploadMedia(blob, name, "image/png");
+      insertMedia(asset.url, asset.type, asset.name, asset.path);
+      closeCameraDialogNow();
+    }).catch((error) => showError(error.message || "Photo could not be saved."));
   }, "image/png");
 }
 
 function toggleRecording() {
+  if (isBusy()) return;
   if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") {
     stopRecording(true);
     return;
@@ -813,14 +960,25 @@ function toggleRecording() {
   mediaRecorder.addEventListener("dataavailable", (event) => {
     if (event.data.size) recordedChunks.push(event.data);
   });
-  mediaRecorder.addEventListener("stop", async () => {
-    if (!shouldSaveRecording || !recordedChunks.length) return;
-    const blobType = normalizeMediaType(mediaRecorder.mimeType || recordedChunks[0].type || "video/webm", "camera-video.webm");
-    const blob = new Blob(recordedChunks, { type: blobType });
-    const name = timestampedName("video", "webm");
-    const asset = await uploadMedia(blob, name, blobType);
-    insertMedia(asset.url, asset.type, asset.name, asset.path);
-    closeCameraDialog();
+  mediaRecorder.addEventListener("stop", () => {
+    if (!shouldSaveRecording || !recordedChunks.length) {
+      recordingStopping = false;
+      syncBusyUi();
+      return;
+    }
+    const stoppedRecorder = mediaRecorder;
+    withBusy("Saving recorded video...", async () => {
+      const blobType = normalizeMediaType(stoppedRecorder.mimeType || recordedChunks[0].type || "video/webm", "camera-video.webm");
+      const blob = new Blob(recordedChunks, { type: blobType });
+      const name = timestampedName("video", "webm");
+      const asset = await uploadMedia(blob, name, blobType);
+      insertMedia(asset.url, asset.type, asset.name, asset.path);
+      closeCameraDialogNow();
+    }).catch((error) => {
+      recordingStopping = false;
+      resetRecordingUi();
+      showError(error.message || "Recorded video could not be saved.");
+    });
   });
   mediaRecorder.start();
   recordingStartedAt = Date.now();
@@ -832,13 +990,15 @@ function toggleRecording() {
 function stopRecording(shouldSave) {
   if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") {
     shouldSaveRecording = shouldSave;
+    recordingStopping = shouldSave;
     mediaRecorder.stop();
   }
   if (!shouldSave) resetRecordingUi();
+  syncBusyUi();
 }
 
 function togglePauseRecording() {
-  if (!mediaRecorder) return;
+  if (!mediaRecorder || isBusy()) return;
   if (mediaRecorder.state === "recording") {
     mediaRecorder.pause();
     pauseStartedAt = Date.now();
@@ -862,6 +1022,7 @@ function applyRecordingUi(state) {
   els.switchCamera.disabled = true;
   updateTimer();
   timerId = setInterval(updateTimer, 500);
+  syncBusyUi();
 }
 
 function resetRecordingUi() {
@@ -870,6 +1031,7 @@ function resetRecordingUi() {
   mediaRecorder = null;
   recordedChunks = [];
   shouldSaveRecording = false;
+  recordingStopping = false;
   recordingStartedAt = 0;
   pausedDurationMs = 0;
   pauseStartedAt = 0;
@@ -881,6 +1043,7 @@ function resetRecordingUi() {
   els.pauseVideo.disabled = true;
   els.capturePhoto.disabled = false;
   syncCameraSwitchUi();
+  syncBusyUi();
 }
 
 function updateTimer() {
@@ -934,6 +1097,74 @@ function repairMediaHtml(html) {
     }
   });
   return template.innerHTML;
+}
+
+async function withBusy(message, action) {
+  busyCount += 1;
+  busyMessage = message;
+  syncBusyUi();
+  try {
+    return await action();
+  } finally {
+    busyCount = Math.max(0, busyCount - 1);
+    if (!busyCount) busyMessage = "";
+    syncBusyUi();
+  }
+}
+
+function isBusy() {
+  return busyCount > 0;
+}
+
+function isRecording() {
+  return recordingStopping || mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused";
+}
+
+function syncBusyUi() {
+  const busy = isBusy();
+  const recording = isRecording();
+  const locked = busy || recording;
+  if (els.uploadStatus) {
+    els.uploadStatus.hidden = !locked;
+    els.uploadStatus.classList.toggle("uploading", busy);
+    els.uploadStatus.classList.toggle("pending", recording && !busy);
+    els.uploadStatus.textContent = busy ? busyMessage || "Working..." : recording ? "Recording in progress..." : "Ready";
+  }
+
+  els.openCreateIssue.disabled = busy;
+  els.saveIssue.disabled = locked;
+  els.cancelIssue.disabled = locked;
+  els.closeDialog.disabled = locked;
+  els.deleteIssue.disabled = locked;
+  els.mediaUpload.disabled = locked;
+  els.openCamera.disabled = locked;
+  els.issueTitle.disabled = busy;
+  els.reporterName.disabled = busy;
+  els.assignedTo.disabled = busy;
+  els.newReporterName.disabled = busy;
+  els.issueStatus.disabled = busy;
+  els.issueDescription.contentEditable = String(!busy);
+
+  document.querySelectorAll("[data-command]").forEach((button) => {
+    button.disabled = locked;
+  });
+  els.issueTagPicker.querySelectorAll("input").forEach((input) => {
+    input.disabled = busy;
+  });
+  els.settingForms.forEach((form) => {
+    form.querySelectorAll("input, button").forEach((control) => {
+      control.disabled = busy;
+    });
+  });
+  document.querySelectorAll(".settings-row button, .inline-color").forEach((control) => {
+    control.disabled = busy || control.dataset.protected === "true";
+  });
+
+  els.closeCamera.disabled = busy;
+  els.capturePhoto.disabled = busy || !!mediaRecorder;
+  els.recordVideo.disabled = busy;
+  els.pauseVideo.disabled = busy || !mediaRecorder;
+  syncCameraSwitchUi();
 }
 
 async function apiJson(path, options = {}) {
