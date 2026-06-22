@@ -2,6 +2,15 @@ const defaultStatuses = ["open", "fixed", "closed but not fixed", "not doing"];
 const defaultReporters = ["Habib"];
 const defaultAssignees = [];
 const defaultTags = [];
+const routeByView = {
+  issues: "/",
+  settings: "/settings",
+};
+const viewByRoute = {
+  "/": "issues",
+  "/issues": "issues",
+  "/settings": "settings",
+};
 
 const els = {
   navItems: document.querySelectorAll("[data-view]"),
@@ -85,12 +94,14 @@ async function init() {
   normalizePeopleReferences();
   bindEvents();
   render();
+  syncViewFromRoute(true);
 }
 
 function bindEvents() {
   els.navItems.forEach((button) => {
-    button.addEventListener("click", () => switchView(button.dataset.view));
+    button.addEventListener("click", () => switchView(button.dataset.view, { push: true }));
   });
+  window.addEventListener("popstate", () => syncViewFromRoute(false));
   els.searchInput.addEventListener("input", renderIssues);
   els.openCreateIssue.addEventListener("click", () => openIssueDialog());
   els.settingForms.forEach((form) => form.addEventListener("submit", addSettingItem));
@@ -139,9 +150,25 @@ function render() {
   syncBusyUi();
 }
 
-function switchView(view) {
-  els.navItems.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
-  els.views.forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === view));
+function syncViewFromRoute(replace = false) {
+  switchView(viewFromPath(window.location.pathname), { replace });
+}
+
+function viewFromPath(path) {
+  return viewByRoute[path.replace(/\/+$/, "") || "/"] || "issues";
+}
+
+function switchView(view, options = {}) {
+  const nextView = routeByView[view] ? view : "issues";
+  els.navItems.forEach((button) => button.classList.toggle("active", button.dataset.view === nextView));
+  els.views.forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === nextView));
+  document.title = nextView === "settings" ? "Settings - BugNote" : "BugNote";
+  const nextPath = routeByView[nextView];
+  if (options.push && window.location.pathname !== nextPath) {
+    history.pushState({ view: nextView }, "", nextPath);
+  } else if (options.replace && window.location.pathname !== nextPath) {
+    history.replaceState({ view: nextView }, "", nextPath);
+  }
 }
 
 function renderSettings() {

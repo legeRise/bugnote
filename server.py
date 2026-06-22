@@ -248,7 +248,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         path = urllib.parse.urlparse(path).path
-        if path == "/":
+        if path in {"/", "/issues", "/settings"}:
             return str(ROOT / "index.html")
         return str(ROOT / path.lstrip("/"))
 
