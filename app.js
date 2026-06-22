@@ -116,7 +116,7 @@ function bindEvents() {
 
 async function loadIssues() {
   const data = await apiJson("/api/issues");
-  issues = Array.isArray(data.issues) ? data.issues : [];
+  issues = Array.isArray(data.issues) ? data.issues.map(normalizeIssue).filter(Boolean) : [];
 }
 
 async function loadSettings() {
@@ -239,6 +239,30 @@ function countStatus(status) {
   return issues.filter((issue) => issue.status === status).length;
 }
 
+function normalizeIssue(issue) {
+  if (!issue || typeof issue !== "object") return null;
+  const id = Number(issue.id || 0);
+  const number = String(issue.number || (id ? String(id).padStart(4, "0") : ""));
+  if (!id && !number) return null;
+  return {
+    id,
+    number,
+    title: normalizeName(issue.title || `Issue #${number || String(id).padStart(4, "0")}`),
+    reporter: normalizeName(issue.reporter || ""),
+    assignedTo: normalizeName(issue.assignedTo || ""),
+    status: normalizeName(issue.status || "open") || "open",
+    tags: Array.isArray(issue.tags) ? issue.tags.map(issueTagLabel).filter(Boolean) : [],
+    descriptionHtml: String(issue.descriptionHtml || ""),
+    media: Array.isArray(issue.media) ? issue.media : [],
+    createdAt: issue.createdAt || "",
+    updatedAt: issue.updatedAt || issue.createdAt || "",
+  };
+}
+
+function issueTagLabel(tag) {
+  return normalizeName(typeof tag === "object" && tag ? tag.label || "" : String(tag || ""));
+}
+
 function renderIssues() {
   const query = normalizeSearchText(els.searchInput.value);
   const terms = query.split(" ").filter(Boolean);
@@ -262,9 +286,9 @@ function renderIssues() {
     row.children[1].textContent = issue.title;
     row.children[2].textContent = previewText(issue.descriptionHtml, issue.media);
     row.children[3].querySelector("span").textContent = titleCase(issue.status);
-    row.children[4].textContent = issue.assignedTo || "-";
+    row.children[4].textContent = issue.assignedTo || "None";
     renderChipGroup(row.children[5], issue.tags || []);
-    row.children[6].textContent = issue.reporter || "-";
+    row.children[6].textContent = issue.reporter || "None";
     els.issuesTable.appendChild(row);
   });
 
@@ -278,7 +302,7 @@ function renderChipGroup(container, tags) {
   const cleanTags = Array.isArray(tags) ? tags.filter(Boolean) : [];
   container.innerHTML = "";
   if (!cleanTags.length) {
-    container.textContent = "-";
+    container.textContent = "None";
     return;
   }
   const wrap = document.createElement("div");

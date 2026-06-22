@@ -77,6 +77,16 @@ def clean_tags(values, max_items=200):
     return cleaned
 
 
+def clean_issue_tags(values, max_items=24):
+    labels = []
+    for value in values if isinstance(values, list) else []:
+        if isinstance(value, dict):
+            labels.append(value.get("label", ""))
+        else:
+            labels.append(value)
+    return clean_list(labels, max_items=max_items)
+
+
 def read_settings():
     settings = DEFAULT_SETTINGS.copy()
     try:
@@ -145,14 +155,80 @@ def next_issue_id():
 
 def read_issue(path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return normalize_issue(json.loads(path.read_text(encoding="utf-8")), path)
     except Exception:
         return None
+
+
+def normalize_issue(issue, path=None):
+    if not isinstance(issue, dict):
+        return None
+    issue_id = int(issue.get("id") or issue_id_from_path(path) or 0)
+    if issue_id <= 0:
+        return None
+    issue_number_text = str(issue.get("number") or issue_number(issue_id))
+    return {
+        "id": issue_id,
+        "number": issue_number_text.zfill(4),
+        "title": str(issue.get("title") or f"Issue #{issue_number_text.zfill(4)}").strip(),
+        "reporter": str(issue.get("reporter") or "").strip(),
+        "assignedTo": str(issue.get("assignedTo") or "").strip(),
+        "status": str(issue.get("status") or "open").strip() or "open",
+        "tags": clean_issue_tags(issue.get("tags", []), max_items=24),
+        "descriptionHtml": str(issue.get("descriptionHtml") or "").strip(),
+        "media": issue.get("media", []) if isinstance(issue.get("media", []), list) else [],
+        "createdAt": str(issue.get("createdAt") or "").strip(),
+        "updatedAt": str(issue.get("updatedAt") or issue.get("createdAt") or "").strip(),
+    }
+
+
+def issue_id_from_path(path):
+    if not path:
+        return 0
+    match = re.search(r"issue-(\d+)", Path(path).name)
+    return int(match.group(1)) if match else 0
+
+
+def media_only_issue(path):
+    match = re.fullmatch(r"issue-(\d+)", path.name)
+    if not match:
+        return None
+    issue_id = int(match.group(1))
+    media = []
+    for file_path in sorted(item for item in path.iterdir() if item.is_file()):
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        media.append(
+            {
+                "name": file_path.name,
+                "type": content_type,
+                "url": "/" + file_path.relative_to(ROOT).as_posix(),
+                "path": file_path.relative_to(ROOT).as_posix(),
+            }
+        )
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
+    return {
+        "id": issue_id,
+        "number": issue_number(issue_id),
+        "title": f"Issue #{issue_number(issue_id)}",
+        "reporter": "",
+        "assignedTo": "",
+        "status": "open",
+        "tags": [],
+        "descriptionHtml": "",
+        "media": media,
+        "createdAt": created_at,
+        "updatedAt": created_at,
+    }
 
 
 def all_issues():
     ensure_dirs()
     issues = [issue for issue in (read_issue(path) for path in ISSUES_DIR.glob("issue-*.json")) if issue]
+    issue_ids = {int(issue.get("id", 0)) for issue in issues}
+    for path in MEDIA_DIR.glob("issue-*"):
+        issue = media_only_issue(path) if path.is_dir() else None
+        if issue and issue["id"] not in issue_ids:
+            issues.append(issue)
     return sorted(issues, key=lambda issue: int(issue.get("id", 0)), reverse=True)
 
 
