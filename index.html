@@ -18,75 +18,130 @@
             <span aria-hidden="true">□</span>
             <span>Issues</span>
           </button>
+          <button class="nav-item" type="button" data-view="settings" title="Settings">
+            <span aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </button>
         </nav>
       </aside>
 
       <main class="main">
-        <header class="topbar">
-          <div>
-            <h1>Project Issues</h1>
-            <p id="projectSummary">Local workspace reporter</p>
-          </div>
-          <button class="primary-button" id="openCreateIssue" type="button">Create Issue</button>
-        </header>
+        <section class="view active" id="issuesView" data-view-panel="issues">
+          <header class="topbar">
+            <div>
+              <h1>Project Issues</h1>
+              <p id="projectSummary">Local workspace reporter</p>
+            </div>
+            <button class="primary-button" id="openCreateIssue" type="button">Create Issue</button>
+          </header>
 
-        <section class="stats-grid" aria-label="Issue status summary">
-          <article class="stat">
-            <span>Total</span>
-            <strong id="totalCount">0</strong>
-          </article>
-          <article class="stat">
-            <span>Open</span>
-            <strong id="openCount">0</strong>
-          </article>
-          <article class="stat">
-            <span>Fixed</span>
-            <strong id="fixedCount">0</strong>
-          </article>
-          <article class="stat">
-            <span>Closed</span>
-            <strong id="closedCount">0</strong>
-          </article>
+          <section class="stats-grid" aria-label="Issue status summary">
+            <article class="stat">
+              <span>Total</span>
+              <strong id="totalCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Open</span>
+              <strong id="openCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Fixed</span>
+              <strong id="fixedCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Closed</span>
+              <strong id="closedCount">0</strong>
+            </article>
+          </section>
+
+          <section class="toolbar" aria-label="Issue filters">
+            <div class="search-wrap">
+              <label for="searchInput">Search</label>
+              <input
+                id="searchInput"
+                type="search"
+                placeholder="Search issue #, title, text, reporter, assignee, status, tag, or date"
+                autocomplete="off"
+              />
+            </div>
+          </section>
+
+          <section class="issues-panel">
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Title</th>
+                    <th>Description</th>
+                    <th>Status</th>
+                    <th>Assigned</th>
+                    <th>Tags</th>
+                    <th>Reporter</th>
+                    <th>Created</th>
+                    <th>Updated</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="issuesTable"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="emptyState" hidden>
+              <strong>No issues found</strong>
+              <span>Create a new report or adjust the filters.</span>
+            </div>
+          </section>
         </section>
 
-        <section class="toolbar" aria-label="Issue filters">
-          <div class="search-wrap">
-            <label for="searchInput">Search</label>
-            <input id="searchInput" type="search" placeholder="Issue #, title, description, reporter" autocomplete="off" />
-          </div>
-          <div class="field">
-            <label for="statusFilter">Status</label>
-            <select id="statusFilter"></select>
-          </div>
-          <div class="field">
-            <label for="reporterFilter">Name</label>
-            <select id="reporterFilter"></select>
-          </div>
-          <button class="ghost-button" id="resetFilters" type="button">Reset</button>
-        </section>
+        <section class="view" id="settingsView" data-view-panel="settings">
+          <header class="topbar">
+            <div>
+              <h1>Settings</h1>
+              <p>Manage reporters, tags, and workflow statuses.</p>
+            </div>
+          </header>
 
-        <section class="issues-panel">
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Title</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th>Reporter</th>
-                  <th>Created</th>
-                  <th>Updated</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody id="issuesTable"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="emptyState" hidden>
-            <strong>No issues found</strong>
-            <span>Create a new report or adjust the filters.</span>
-          </div>
+          <section class="settings-grid" aria-label="Reporter settings">
+            <article class="settings-panel">
+              <h2>Reporters</h2>
+              <form class="add-row" data-setting-form="reporters">
+                <div class="field">
+                  <label for="newReporterSetting">Reporter name</label>
+                  <input id="newReporterSetting" type="text" maxlength="80" placeholder="Add reporter" autocomplete="off" />
+                </div>
+                <button class="secondary-button" type="submit">Add</button>
+              </form>
+              <div class="settings-list" id="reporterSettingsList"></div>
+            </article>
+
+            <article class="settings-panel">
+              <h2>Tags</h2>
+              <form class="add-row tag-add-row" data-setting-form="tags">
+                <div class="field">
+                  <label for="newTagSetting">Tag label</label>
+                  <input id="newTagSetting" type="text" maxlength="40" placeholder="Add tag" autocomplete="off" />
+                </div>
+                <div class="field color-field">
+                  <label for="newTagColor">Color</label>
+                  <input id="newTagColor" type="color" value="#0f8b8d" />
+                </div>
+                <button class="secondary-button" type="submit">Add</button>
+              </form>
+              <div class="settings-list" id="tagSettingsList"></div>
+            </article>
+
+            <article class="settings-panel">
+              <h2>Statuses</h2>
+              <form class="add-row" data-setting-form="statuses">
+                <div class="field">
+                  <label for="newStatusSetting">Status name</label>
+                  <input id="newStatusSetting" type="text" maxlength="60" placeholder="Add status" autocomplete="off" />
+                </div>
+                <button class="secondary-button" type="submit">Add</button>
+              </form>
+              <div class="settings-list" id="statusSettingsList"></div>
+            </article>
+          </section>
         </section>
       </main>
     </div>
@@ -110,6 +165,10 @@
             <label for="reporterName">Reporter</label>
             <select id="reporterName"></select>
           </div>
+          <div class="field">
+            <label for="assignedTo">Assigned to</label>
+            <select id="assignedTo"></select>
+          </div>
           <div class="field" id="newReporterField" hidden>
             <label for="newReporterName">New reporter</label>
             <input id="newReporterName" type="text" maxlength="80" placeholder="Reporter name" />
@@ -118,6 +177,11 @@
             <label for="issueStatus">Status</label>
             <select id="issueStatus"></select>
           </div>
+        </div>
+
+        <div class="field tag-field">
+          <label>Tags</label>
+          <div class="tag-picker" id="issueTagPicker"></div>
         </div>
 
         <div class="editor-shell">
@@ -144,7 +208,10 @@
         </div>
 
         <div class="dialog-actions">
-          <button class="ghost-button" id="deleteIssue" type="button" hidden>Delete</button>
+          <details class="danger-menu" id="dangerMenu" hidden>
+            <summary>More</summary>
+            <button class="ghost-button danger-button" id="deleteIssue" type="button">Delete issue</button>
+          </details>
           <span class="form-error" id="formError" role="alert"></span>
           <button class="secondary-button" id="cancelIssue" type="button">Cancel</button>
           <button class="primary-button" id="saveIssue" type="submit">Save Issue</button>

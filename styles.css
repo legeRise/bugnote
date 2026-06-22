@@ -99,6 +99,14 @@ select {
   color: #fff;
 }
 
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
 .main {
   padding: 26px clamp(18px, 3vw, 38px);
   min-width: 0;
@@ -170,7 +178,7 @@ h1 {
   border-radius: 8px;
   padding: 12px;
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) minmax(160px, 220px) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items: end;
   margin-bottom: 16px;
@@ -310,6 +318,67 @@ th {
   color: var(--danger);
 }
 
+.tags-cell {
+  max-width: 220px;
+}
+
+.chip-wrap,
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.tag-chip,
+.tag-option span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: var(--tag-bg, #eef8f8);
+  color: var(--tag-text, #075f61);
+  border: 1px solid var(--tag-border, #b9dddd);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tag-field {
+  margin-bottom: 16px;
+}
+
+.tag-picker {
+  min-height: 42px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tag-option {
+  cursor: pointer;
+}
+
+.tag-option input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tag-option input:checked + span {
+  box-shadow: 0 0 0 3px rgba(36, 89, 214, 0.28);
+}
+
+.tag-picker-empty {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .empty-state {
   padding: 54px 20px;
   display: grid;
@@ -368,6 +437,104 @@ dialog::backdrop {
   grid-template-columns: 1.4fr 0.8fr 0.8fr 0.7fr;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settings-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  min-width: 0;
+}
+
+.settings-panel h2 {
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+
+.add-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.tag-add-row {
+  grid-template-columns: 1fr 72px auto;
+}
+
+.color-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.settings-list {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.tag-settings-row {
+  grid-template-columns: minmax(0, 1fr) 38px auto;
+}
+
+.settings-row > span:not(.tag-chip) {
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.inline-color {
+  width: 34px;
+  min-width: 0;
+  height: 30px;
+  min-height: 30px;
+  padding: 3px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-empty {
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quiet-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  min-height: 30px;
+  padding: 0 6px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.quiet-button:hover {
+  color: var(--danger);
 }
 
 .title-field {
@@ -526,10 +693,28 @@ dialog::backdrop {
   margin-top: 16px;
 }
 
+.danger-menu {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.danger-menu summary {
+  cursor: pointer;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+}
+
+.danger-button {
+  color: var(--danger);
+  margin-top: 6px;
+}
+
 .form-error {
   color: var(--danger);
   font-weight: 700;
-  margin-right: auto;
 }
 
 .camera-dialog {
@@ -643,8 +828,8 @@ button:disabled {
   }
 
   .stats-grid,
-  .toolbar,
-  .form-grid {
+  .form-grid,
+  .settings-grid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -717,6 +902,8 @@ button:disabled {
   .stats-grid,
   .toolbar,
   .form-grid,
+  .settings-grid,
+  .add-row,
   .status-add-row {
     grid-template-columns: 1fr;
   }
@@ -877,6 +1064,10 @@ button:disabled {
   .secondary-button,
   .ghost-button {
     width: 100%;
+  }
+
+  .danger-menu {
+    margin-right: 0;
   }
 }
 

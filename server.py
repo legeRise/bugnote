@@ -20,14 +20,92 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ISSUES_DIR = ROOT / "issues"
 MEDIA_DIR = ROOT / "media"
+SETTINGS_PATH = ROOT / "settings.json"
 MAX_JSON_BYTES = int(os.environ.get("MAX_JSON_BYTES", str(512 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 FILE_LOCK = threading.Lock()
+
+DEFAULT_SETTINGS = {
+    "reporters": ["Habib"],
+    "tags": [],
+    "statuses": ["open", "fixed", "closed but not fixed", "not doing"],
+}
+
+DEFAULT_TAG_COLOR = "#0f8b8d"
 
 
 def ensure_dirs():
     ISSUES_DIR.mkdir(parents=True, exist_ok=True)
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def clean_list(values, max_items=200):
+    cleaned = []
+    seen = set()
+    for value in values if isinstance(values, list) else []:
+        label = re.sub(r"\s+", " ", str(value)).strip()
+        key = label.casefold()
+        if label and key not in seen:
+            cleaned.append(label[:80])
+            seen.add(key)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def clean_color(value):
+    color = str(value or "").strip()
+    return color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else DEFAULT_TAG_COLOR
+
+
+def clean_tags(values, max_items=200):
+    cleaned = []
+    seen = set()
+    for value in values if isinstance(values, list) else []:
+        if isinstance(value, dict):
+            label = re.sub(r"\s+", " ", str(value.get("label", ""))).strip()
+            color = clean_color(value.get("color"))
+        else:
+            label = re.sub(r"\s+", " ", str(value)).strip()
+            color = DEFAULT_TAG_COLOR
+        key = label.casefold()
+        if label and key not in seen:
+            cleaned.append({"label": label[:40], "color": color})
+            seen.add(key)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def read_settings():
+    settings = DEFAULT_SETTINGS.copy()
+    try:
+        saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        if isinstance(saved, dict):
+            settings.update(
+                {
+                    "reporters": clean_list(saved.get("reporters", [])),
+                    "tags": clean_tags(saved.get("tags", [])),
+                    "statuses": clean_list(saved.get("statuses", [])),
+                }
+            )
+    except Exception:
+        pass
+    return {
+        "reporters": clean_list([*DEFAULT_SETTINGS["reporters"], *settings.get("reporters", [])]) or DEFAULT_SETTINGS["reporters"],
+        "tags": clean_tags(settings.get("tags", [])),
+        "statuses": clean_list([*DEFAULT_SETTINGS["statuses"], *settings.get("statuses", [])]) or DEFAULT_SETTINGS["statuses"],
+    }
+
+
+def write_settings(settings):
+    next_settings = {
+        "reporters": clean_list(settings.get("reporters", [])) or DEFAULT_SETTINGS["reporters"],
+        "tags": clean_tags(settings.get("tags", [])),
+        "statuses": clean_list(settings.get("statuses", [])) or DEFAULT_SETTINGS["statuses"],
+    }
+    SETTINGS_PATH.write_text(json.dumps(next_settings, indent=2) + "\n", encoding="utf-8")
+    return next_settings
 
 
 def issue_number(issue_id):
@@ -104,6 +182,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.api_path == "/api/issues/next-id":
             issue_id = next_issue_id()
             return self.json({"id": issue_id, "number": issue_number(issue_id)})
+        if self.api_path == "/api/settings":
+            return self.json(read_settings())
         if self.api_path == "/api/health":
             return self.json({"ok": True})
         return super().do_GET()
@@ -113,6 +193,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.save_issue()
         if self.api_path == "/api/media":
             return self.save_media()
+        if self.api_path == "/api/settings":
+            return self.save_settings()
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_DELETE(self):
@@ -162,7 +244,9 @@ class Handler(SimpleHTTPRequestHandler):
                 "number": issue_number(issue_id),
                 "title": str(payload.get("title", "")).strip(),
                 "reporter": str(payload.get("reporter", "")).strip(),
+                "assignedTo": str(payload.get("assignedTo", "")).strip(),
                 "status": str(payload.get("status", "open")).strip() or "open",
+                "tags": clean_list(payload.get("tags", []), max_items=24),
                 "descriptionHtml": str(payload.get("descriptionHtml", "")).strip(),
                 "media": payload.get("media", []),
                 "createdAt": existing.get("createdAt") or now,
@@ -172,6 +256,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({"error": "Title is required"}, 400)
             issue_path(issue_id).write_text(json.dumps(issue, indent=2) + "\n", encoding="utf-8")
         self.json({"ok": True, "issue": issue})
+
+    def save_settings(self):
+        ensure_dirs()
+        try:
+            payload = self.read_json()
+        except ValueError as exc:
+            return self.json({"error": str(exc)}, 413)
+        with FILE_LOCK:
+            settings = write_settings(payload)
+        self.json({"ok": True, "settings": settings})
 
     def save_media(self):
         ensure_dirs()

@@ -1,32 +1,40 @@
 const defaultStatuses = ["open", "fixed", "closed but not fixed", "not doing"];
 const defaultReporters = ["Habib"];
+const defaultTags = [];
 
 const els = {
+  navItems: document.querySelectorAll("[data-view]"),
+  views: document.querySelectorAll("[data-view-panel]"),
   totalCount: document.querySelector("#totalCount"),
   openCount: document.querySelector("#openCount"),
   fixedCount: document.querySelector("#fixedCount"),
   closedCount: document.querySelector("#closedCount"),
   searchInput: document.querySelector("#searchInput"),
-  statusFilter: document.querySelector("#statusFilter"),
-  reporterFilter: document.querySelector("#reporterFilter"),
-  resetFilters: document.querySelector("#resetFilters"),
   issuesTable: document.querySelector("#issuesTable"),
   emptyState: document.querySelector("#emptyState"),
   openCreateIssue: document.querySelector("#openCreateIssue"),
+  reporterSettingsList: document.querySelector("#reporterSettingsList"),
+  tagSettingsList: document.querySelector("#tagSettingsList"),
+  statusSettingsList: document.querySelector("#statusSettingsList"),
+  settingForms: document.querySelectorAll("[data-setting-form]"),
+  newTagColor: document.querySelector("#newTagColor"),
   issueDialog: document.querySelector("#issueDialog"),
   issueForm: document.querySelector("#issueForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
   issueTitle: document.querySelector("#issueTitle"),
   reporterName: document.querySelector("#reporterName"),
+  assignedTo: document.querySelector("#assignedTo"),
   newReporterField: document.querySelector("#newReporterField"),
   newReporterName: document.querySelector("#newReporterName"),
   issueStatus: document.querySelector("#issueStatus"),
+  issueTagPicker: document.querySelector("#issueTagPicker"),
   issueDescription: document.querySelector("#issueDescription"),
   storageHint: document.querySelector("#storageHint"),
   mediaUpload: document.querySelector("#mediaUpload"),
   closeDialog: document.querySelector("#closeDialog"),
   cancelIssue: document.querySelector("#cancelIssue"),
   saveIssue: document.querySelector("#saveIssue"),
+  dangerMenu: document.querySelector("#dangerMenu"),
   deleteIssue: document.querySelector("#deleteIssue"),
   formError: document.querySelector("#formError"),
   openCamera: document.querySelector("#openCamera"),
@@ -43,6 +51,11 @@ const els = {
 };
 
 let issues = [];
+let settings = {
+  reporters: [...defaultReporters],
+  tags: [...defaultTags],
+  statuses: [...defaultStatuses],
+};
 let editingId = null;
 let draftIssueId = null;
 let savedRange = null;
@@ -61,17 +74,18 @@ let videoInputDevices = [];
 init();
 
 async function init() {
-  await loadIssues();
+  await Promise.all([loadIssues(), loadSettings()]);
   bindEvents();
   render();
 }
 
 function bindEvents() {
+  els.navItems.forEach((button) => {
+    button.addEventListener("click", () => switchView(button.dataset.view));
+  });
   els.searchInput.addEventListener("input", renderIssues);
-  els.statusFilter.addEventListener("change", renderIssues);
-  els.reporterFilter.addEventListener("change", renderIssues);
-  els.resetFilters.addEventListener("click", resetFilters);
   els.openCreateIssue.addEventListener("click", () => openIssueDialog());
+  els.settingForms.forEach((form) => form.addEventListener("submit", addSettingItem));
   els.closeDialog.addEventListener("click", closeIssueDialog);
   els.cancelIssue.addEventListener("click", closeIssueDialog);
   els.issueForm.addEventListener("submit", saveIssue);
@@ -105,10 +119,113 @@ async function loadIssues() {
   issues = Array.isArray(data.issues) ? data.issues : [];
 }
 
+async function loadSettings() {
+  const data = await apiJson("/api/settings");
+  settings = normalizeSettings(data);
+}
+
 function render() {
   syncOptions();
   renderStats();
   renderIssues();
+  renderSettings();
+}
+
+function switchView(view) {
+  els.navItems.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+  els.views.forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === view));
+}
+
+function renderSettings() {
+  renderSettingsList(els.reporterSettingsList, "reporters", sortedReporters());
+  renderSettingsList(els.tagSettingsList, "tags", sortedTagLabels(), true);
+  renderSettingsList(els.statusSettingsList, "statuses", sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]));
+}
+
+function renderSettingsList(container, type, values, useChips = false) {
+  container.innerHTML = "";
+  if (!values.length) {
+    const empty = document.createElement("div");
+    empty.className = "settings-empty";
+    empty.textContent = "Nothing added yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  values.forEach((value) => {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    if (useChips) row.classList.add("tag-settings-row");
+    const label = document.createElement("span");
+    label.className = useChips ? "tag-chip" : "";
+    label.textContent = value;
+    if (useChips) applyTagColor(label, value);
+    if (useChips) {
+      const colorInput = document.createElement("input");
+      colorInput.className = "inline-color";
+      colorInput.type = "color";
+      colorInput.value = normalizeColor(tagMeta(value).color);
+      colorInput.title = `Change ${value} color`;
+      colorInput.addEventListener("change", () => updateTagColor(value, colorInput.value));
+      row.append(label, colorInput);
+    } else {
+      row.appendChild(label);
+    }
+    const button = document.createElement("button");
+    button.className = "quiet-button";
+    button.type = "button";
+    button.textContent = "Remove";
+    button.disabled = isProtectedSetting(type, value);
+    button.addEventListener("click", () => removeSettingItem(type, value));
+    row.appendChild(button);
+    container.appendChild(row);
+  });
+}
+
+async function addSettingItem(event) {
+  event.preventDefault();
+  const type = event.currentTarget.dataset.settingForm;
+  const input = event.currentTarget.querySelector("input");
+  const value = normalizeName(input.value);
+  if (!value) return;
+  if (type === "tags") {
+    settings.tags = sortedTagObjects([
+      ...settings.tags.filter((tag) => tag.label.toLowerCase() !== value.toLowerCase()),
+      { label: value, color: els.newTagColor.value || "#0f8b8d" },
+    ]);
+  } else {
+    settings[type] = sortedValues([...(settings[type] || []), value]);
+  }
+  input.value = "";
+  await saveSettings();
+}
+
+async function removeSettingItem(type, value) {
+  if (type === "tags") {
+    settings.tags = settings.tags.filter((tag) => tag.label !== value);
+  } else {
+    settings[type] = (settings[type] || []).filter((item) => item !== value);
+  }
+  await saveSettings();
+}
+
+async function updateTagColor(label, color) {
+  settings.tags = settings.tags.map((tag) => (tag.label === label ? { ...tag, color: normalizeColor(color) } : tag));
+  await saveSettings();
+}
+
+async function saveSettings() {
+  const result = await apiJson("/api/settings", { method: "POST", body: settings });
+  settings = normalizeSettings(result.settings || settings);
+  render();
+}
+
+function isProtectedSetting(type, value) {
+  if (type === "tags") return !settings.tags.some((tag) => tag.label === value);
+  if (!settings[type]?.includes(value)) return true;
+  if (type === "reporters") return defaultReporters.includes(value);
+  if (type === "statuses") return defaultStatuses.includes(value);
+  return false;
 }
 
 function renderStats() {
@@ -123,13 +240,9 @@ function countStatus(status) {
 }
 
 function renderIssues() {
-  const query = els.searchInput.value.trim().toLowerCase();
-  const status = els.statusFilter.value;
-  const reporter = els.reporterFilter.value;
-  const filtered = issues.filter((issue) => {
-    const text = [issue.id, issue.title, issue.reporter, stripHtml(issue.descriptionHtml)].join(" ").toLowerCase();
-    return (!query || text.includes(query)) && (!status || issue.status === status) && (!reporter || issue.reporter === reporter);
-  });
+  const query = normalizeSearchText(els.searchInput.value);
+  const terms = query.split(" ").filter(Boolean);
+  const filtered = issues.filter((issue) => !terms.length || terms.every((term) => issueSearchText(issue).includes(term)));
 
   els.issuesTable.innerHTML = "";
   filtered.forEach((issue) => {
@@ -139,6 +252,8 @@ function renderIssues() {
       <td data-label="Title" class="title-cell"></td>
       <td data-label="Description" class="desc-cell"></td>
       <td data-label="Status"><span class="status-pill ${statusClass(issue.status)}"></span></td>
+      <td data-label="Assigned"></td>
+      <td data-label="Tags" class="tags-cell"></td>
       <td data-label="Reporter"></td>
       <td data-label="Created">${formatDate(issue.createdAt)}</td>
       <td data-label="Updated">${formatDate(issue.updatedAt)}</td>
@@ -147,7 +262,9 @@ function renderIssues() {
     row.children[1].textContent = issue.title;
     row.children[2].textContent = previewText(issue.descriptionHtml, issue.media);
     row.children[3].querySelector("span").textContent = titleCase(issue.status);
-    row.children[4].textContent = issue.reporter || "-";
+    row.children[4].textContent = issue.assignedTo || "-";
+    renderChipGroup(row.children[5], issue.tags || []);
+    row.children[6].textContent = issue.reporter || "-";
     els.issuesTable.appendChild(row);
   });
 
@@ -157,13 +274,104 @@ function renderIssues() {
   });
 }
 
+function renderChipGroup(container, tags) {
+  const cleanTags = Array.isArray(tags) ? tags.filter(Boolean) : [];
+  container.innerHTML = "";
+  if (!cleanTags.length) {
+    container.textContent = "-";
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "chip-wrap";
+  cleanTags.forEach((tag) => {
+    const chip = document.createElement("span");
+    chip.className = "tag-chip";
+    chip.textContent = tag;
+    applyTagColor(chip, tag);
+    wrap.appendChild(chip);
+  });
+  container.appendChild(wrap);
+}
+
+function issueSearchText(issue) {
+  const issueTags = Array.isArray(issue.tags) ? issue.tags : [];
+  return normalizeSearchText(
+    [
+      issue.id,
+      issue.number,
+      `#${issue.number || String(issue.id).padStart(4, "0")}`,
+      issue.title,
+      stripHtml(issue.descriptionHtml),
+      issue.reporter,
+      issue.assignedTo,
+      issue.status,
+      titleCase(issue.status),
+      issueTags.join(" "),
+      issue.createdAt,
+      issue.updatedAt,
+      formatDate(issue.createdAt),
+      formatDate(issue.updatedAt),
+      compactDateParts(issue.createdAt),
+      compactDateParts(issue.updatedAt),
+    ].join(" "),
+  );
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[#,_/.-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactDateParts(date) {
+  if (!date) return "";
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const monthName = parsed.toLocaleString(undefined, { month: "short" });
+  const longMonthName = parsed.toLocaleString(undefined, { month: "long" });
+  return `${year} ${month} ${day} ${year}${month}${day} ${day}${month}${year} ${monthName} ${longMonthName}`;
+}
+
 function syncOptions() {
-  const statuses = [...new Set([...defaultStatuses, ...issues.map((issue) => issue.status).filter(Boolean)])];
+  const statuses = sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]);
   const reporters = sortedReporters();
-  fillSelect(els.statusFilter, [["", "All statuses"], ...statuses.map((status) => [status, titleCase(status)])], els.statusFilter.value);
   fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), els.issueStatus.value || "open");
-  fillSelect(els.reporterFilter, [["", "All names"], ...reporters.map((name) => [name, name])], els.reporterFilter.value);
   fillSelect(els.reporterName, [...reporters.map((name) => [name, name]), ["__new__", "New reporter"]], els.reporterName.value);
+  fillSelect(els.assignedTo, [["", "Unassigned"], ...reporters.map((name) => [name, name])], els.assignedTo.value);
+}
+
+function renderIssueTagPicker(selectedTags = []) {
+  const tags = sortedTagLabels();
+  els.issueTagPicker.innerHTML = "";
+  if (!tags.length) {
+    const empty = document.createElement("span");
+    empty.className = "tag-picker-empty";
+    empty.textContent = "Add tags in Settings.";
+    els.issueTagPicker.appendChild(empty);
+    return;
+  }
+  tags.forEach((tag) => {
+    const label = document.createElement("label");
+    label.className = "tag-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = tag;
+    input.checked = selectedTags.includes(tag);
+    const span = document.createElement("span");
+    span.textContent = tag;
+    applyTagColor(span, tag);
+    label.append(input, span);
+    els.issueTagPicker.appendChild(label);
+  });
+}
+
+function selectedIssueTags() {
+  return [...els.issueTagPicker.querySelectorAll("input:checked")].map((input) => input.value);
 }
 
 function fillSelect(select, options, currentValue) {
@@ -175,13 +383,6 @@ function fillSelect(select, options, currentValue) {
     select.appendChild(option);
   });
   if (options.some(([value]) => value === currentValue)) select.value = currentValue;
-}
-
-function resetFilters() {
-  els.searchInput.value = "";
-  els.statusFilter.value = "";
-  els.reporterFilter.value = "";
-  renderIssues();
 }
 
 async function openIssueDialog(id = null) {
@@ -198,10 +399,13 @@ async function openIssueDialog(id = null) {
   els.issueTitle.value = issue?.title || "";
   syncOptions();
   els.reporterName.value = issue?.reporter || defaultReporters[0];
+  els.assignedTo.value = issue?.assignedTo || "";
   els.newReporterName.value = "";
   els.issueStatus.value = issue?.status || "open";
+  renderIssueTagPicker(issue?.tags || []);
   els.issueDescription.innerHTML = repairMediaHtml(issue?.descriptionHtml || "");
-  els.deleteIssue.hidden = !issue;
+  els.dangerMenu.hidden = !issue;
+  els.dangerMenu.open = false;
   els.formError.textContent = "";
   els.storageHint.textContent = `Images and videos will be written to media/issue-${String(draftIssueId).padStart(4, "0")}/`;
   toggleNewReporter();
@@ -220,7 +424,9 @@ async function saveIssue(event) {
   event.preventDefault();
   const title = els.issueTitle.value.trim();
   const reporter = resolveReporter();
+  const assignedTo = els.assignedTo.value;
   const status = els.issueStatus.value;
+  const tags = selectedIssueTags();
   const descriptionHtml = sanitizeEditorHtml(els.issueDescription.innerHTML);
   const media = collectMedia();
 
@@ -228,7 +434,7 @@ async function saveIssue(event) {
   if (!reporter) return showError("Reporter is required.");
   if (!stripHtml(descriptionHtml) && !media.length) return showError("Description or media is required.");
 
-  const payload = { id: draftIssueId || editingId, title, reporter, status, descriptionHtml, media };
+  const payload = { id: draftIssueId || editingId, title, reporter, assignedTo, status, tags, descriptionHtml, media };
   const result = await apiJson("/api/issues", { method: "POST", body: payload });
   const saved = result.issue;
   const existingIndex = issues.findIndex((issue) => issue.id === saved.id);
@@ -236,6 +442,10 @@ async function saveIssue(event) {
     issues[existingIndex] = saved;
   } else {
     issues.unshift(saved);
+  }
+  if (!settings.reporters.includes(reporter)) {
+    settings.reporters = sortedValues([...settings.reporters, reporter]);
+    await saveSettings();
   }
   closeIssueDialog();
   render();
@@ -265,9 +475,72 @@ function toggleNewReporter() {
 }
 
 function sortedReporters() {
-  return [...new Set([...defaultReporters, ...issues.map((issue) => issue.reporter).filter(Boolean)])].sort((a, b) =>
-    a.localeCompare(b),
-  );
+  return sortedValues([
+    ...settings.reporters,
+    ...issues.map((issue) => issue.reporter).filter(Boolean),
+    ...issues.map((issue) => issue.assignedTo).filter(Boolean),
+  ]);
+}
+
+function sortedTagLabels() {
+  return sortedValues([
+    ...settings.tags.map((tag) => tag.label),
+    ...issues.flatMap((issue) => (Array.isArray(issue.tags) ? issue.tags : [])),
+  ]);
+}
+
+function sortedTagObjects(tags) {
+  const seen = new Set();
+  return tags
+    .filter((tag) => tag.label && !seen.has(tag.label.toLowerCase()) && seen.add(tag.label.toLowerCase()))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function sortedValues(values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeSettings(data = {}) {
+  return {
+    reporters: sortedValues([...defaultReporters, ...(Array.isArray(data.reporters) ? data.reporters : [])]),
+    tags: sortedTagObjects([...(Array.isArray(data.tags) ? data.tags : defaultTags)].map(normalizeTag)),
+    statuses: sortedValues([...defaultStatuses, ...(Array.isArray(data.statuses) ? data.statuses : [])]),
+  };
+}
+
+function normalizeTag(tag) {
+  if (typeof tag === "object" && tag) {
+    return {
+      label: normalizeName(tag.label || ""),
+      color: normalizeColor(tag.color),
+    };
+  }
+  return {
+    label: normalizeName(String(tag || "")),
+    color: "#0f8b8d",
+  };
+}
+
+function tagMeta(label) {
+  return settings.tags.find((tag) => tag.label === label) || { label, color: "#0f8b8d" };
+}
+
+function applyTagColor(element, label) {
+  const color = normalizeColor(tagMeta(label).color);
+  element.style.setProperty("--tag-bg", color);
+  element.style.setProperty("--tag-border", color);
+  element.style.setProperty("--tag-text", readableTextColor(color));
+}
+
+function normalizeColor(color) {
+  return /^#[0-9a-f]{6}$/i.test(String(color || "")) ? color : "#0f8b8d";
+}
+
+function readableTextColor(hex) {
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 160 ? "#10213f" : "#ffffff";
 }
 
 async function handleUpload(event) {
