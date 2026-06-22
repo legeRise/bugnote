@@ -407,7 +407,7 @@ if __name__ == "__main__":
     ensure_dirs()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "9201"))
-    print(f"Reporter on http://{host}:{port}")
+    print(f"BugNote on http://{host}:{port}")
     for address in local_ip_addresses():
         print(f"Mobile/LAN: http://{address}:{port}")
     print(f"Issues: {ISSUES_DIR}")
@@ -415,4 +415,4 @@ if __name__ == "__main__":
     try:
         ThreadingHTTPServer((host, port), Handler).serve_forever()
     except KeyboardInterrupt:
-        print("\nReporter stopped")
+        print("\nBugNote stopped")

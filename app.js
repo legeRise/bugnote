@@ -134,7 +134,6 @@ async function loadSettings() {
 
 function render() {
   syncOptions();
-  renderStats();
   renderIssues();
   renderSettings();
   syncBusyUi();
@@ -247,15 +246,15 @@ function isProtectedSetting(type, value) {
   return false;
 }
 
-function renderStats() {
-  els.totalCount.textContent = issues.length;
-  els.openCount.textContent = countStatus("open");
-  els.fixedCount.textContent = countStatus("fixed");
-  els.closedCount.textContent = issues.filter((issue) => issue.status.startsWith("closed")).length;
+function renderStats(visibleIssues = issues) {
+  els.totalCount.textContent = visibleIssues.length;
+  els.openCount.textContent = countStatus("open", visibleIssues);
+  els.fixedCount.textContent = countStatus("fixed", visibleIssues);
+  els.closedCount.textContent = visibleIssues.filter((issue) => issue.status.startsWith("closed")).length;
 }
 
-function countStatus(status) {
-  return issues.filter((issue) => issue.status === status).length;
+function countStatus(status, visibleIssues = issues) {
+  return visibleIssues.filter((issue) => issue.status === status).length;
 }
 
 function normalizeIssue(issue) {
@@ -285,6 +284,7 @@ function issueTagLabel(tag) {
 function renderIssues() {
   const query = parseIssueQuery(els.searchInput.value);
   const filtered = issues.filter((issue) => issueMatchesQuery(issue, query));
+  renderStats(filtered);
 
   els.issuesTable.innerHTML = "";
   filtered.forEach((issue) => {

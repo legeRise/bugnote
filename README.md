@@ -1,7 +1,7 @@
 ````md
 # BugNote
 
-A small, file-based issue reporter that runs with Python 3. No npm install, no database, and no required cloud setup.
+A small, file-based issue tracker that runs with Python 3. No npm install, no database, and no required cloud setup.
 
 ## Why Python's `http.server`?
 
