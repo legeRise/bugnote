@@ -100,8 +100,69 @@
               <p>Manage reporters, assignees, tags, and workflow statuses.</p>
             </div>
           </header>
+          <div class="settings-message" id="settingsMessage" role="status" hidden></div>
 
           <section class="settings-grid" aria-label="BugNote settings">
+            <article class="settings-panel github-panel">
+              <div class="settings-title-row">
+                <div>
+                  <h2>GitHub Sync</h2>
+                  <p>Create or update GitHub issues when BugNote issues are saved.</p>
+                </div>
+                <label class="switch-row">
+                  <input id="githubEnabled" type="checkbox" />
+                  <span>Enabled</span>
+                </label>
+              </div>
+              <form class="github-form" id="githubForm">
+                <div class="field">
+                  <label for="githubRepoUrl">Repository</label>
+                  <input id="githubRepoUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label for="githubToken">Token</label>
+                  <input id="githubToken" type="password" placeholder="Paste token to save or replace" autocomplete="off" />
+                </div>
+                <div class="github-status-row">
+                  <span class="github-status" id="githubStatus">Not connected.</span>
+                  <button class="secondary-button" id="testGithub" type="button">Test</button>
+                  <button class="primary-button" type="submit">Save</button>
+                </div>
+              </form>
+              <div class="assignee-map">
+                <div class="map-head">
+                  <strong>Assignee Mapping</strong>
+                  <span>BugNote assignees must map to assignable GitHub usernames.</span>
+                </div>
+                <div class="map-table" id="assigneeMapTable"></div>
+              </div>
+              <div class="assignee-map">
+                <div class="map-head">
+                  <strong>Status Mapping</strong>
+                  <span>Choose what happens on GitHub when an issue gets each status. Only 3 actions exist: Keep open, Close as completed, or Close as won't fix. Statuses not listed here won't change GitHub.</span>
+                </div>
+                <div class="map-table" id="statusMapTable"></div>
+              </div>
+              <div class="assignee-map">
+                <div class="map-head">
+                  <strong>Multiple Repositories</strong>
+                  <span>Add extra repos to sync issues to multiple GitHub repos. Each issue remembers which repo it was created in.</span>
+                </div>
+                <div class="repos-list" id="reposList"></div>
+                <form class="repo-add-form" id="repoForm">
+                  <div class="field repo-url-field">
+                    <label for="repoUrl">GitHub repo URL</label>
+                    <input id="repoUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" />
+                  </div>
+                  <div class="field repo-name-field">
+                    <label for="repoName">Label (optional)</label>
+                    <input id="repoName" type="text" maxlength="80" placeholder="e.g. Project A" autocomplete="off" />
+                  </div>
+                  <button class="secondary-button" type="submit">Add</button>
+                </form>
+              </div>
+            </article>
+
             <article class="settings-panel">
               <h2>Reporters</h2>
               <form class="add-row" data-setting-form="reporters">
@@ -221,10 +282,13 @@
         </div>
 
         <div class="dialog-actions">
-          <details class="danger-menu" id="dangerMenu" hidden>
-            <summary>More</summary>
-            <button class="ghost-button danger-button" id="deleteIssue" type="button">Delete issue</button>
-          </details>
+          <div class="dialog-left-actions">
+            <details class="danger-menu" id="dangerMenu" hidden>
+              <summary>More</summary>
+              <button class="ghost-button danger-button" id="deleteIssue" type="button">Delete issue</button>
+            </details>
+            <a class="secondary-button github-issue-link" id="viewGithubIssue" href="#" target="_blank" rel="noopener" hidden>View on GitHub</a>
+          </div>
           <span class="form-error" id="formError" role="alert"></span>
           <button class="secondary-button" id="cancelIssue" type="button">Cancel</button>
           <button class="primary-button" id="saveIssue" type="submit">Save Issue</button>

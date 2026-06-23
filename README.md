@@ -35,6 +35,7 @@ The server returns the same app shell for these routes so refreshes and direct l
 - Create, edit, and delete issues.
 - Track title, reporter, assignee, status, tags, description, created date, and updated date.
 - Manage reporters, assignees, tags, tag colors, and statuses from Settings.
+- Optionally sync saved issues to a GitHub repository.
 - Attach images and videos by upload, paste, drag-and-drop, or camera capture.
 - Keep media inline with the issue description.
 - Filter issues from one search field.
@@ -70,12 +71,15 @@ BugNote stores data as files in the project folder.
 
 ```text
 settings.json                  settings
+github_settings.json           GitHub repo, token, and assignee mapping
 issues/issue-0001.json         issue data
 media/issue-0001/photo.png     media for an issue
 media/issue-0001/video.webm
 ```
 
 Existing issue files are read on startup. Older settings that only have `reporters` are still accepted; assignees are initialized from that list for compatibility.
+
+GitHub sync is configured from Settings. BugNote stores the token in `github_settings.json`, creates missing GitHub labels from BugNote tags, maps BugNote assignees to GitHub usernames, and keeps the GitHub issue number in the local issue JSON. `fixed` closes the GitHub issue as completed; `not doing` and `closed but not fixed` close it as not planned. Images and videos remain in `media/`; GitHub issue bodies link back to those files.
 
 ## Limits
 

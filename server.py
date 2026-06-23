@@ -13,6 +13,8 @@ import socket
 import threading
 import time
 import urllib.parse
+import urllib.request
+import urllib.error
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 ISSUES_DIR = ROOT / "issues"
 MEDIA_DIR = ROOT / "media"
 SETTINGS_PATH = ROOT / "settings.json"
+GITHUB_SETTINGS_PATH = ROOT / "github_settings.json"
 MAX_JSON_BYTES = int(os.environ.get("MAX_JSON_BYTES", str(512 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 FILE_LOCK = threading.Lock()
@@ -33,6 +36,8 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_TAG_COLOR = "#0f8b8d"
+GITHUB_API = "https://api.github.com"
+GITHUB_TOKEN_KEEP = "__bugnote_keep_existing_token__"
 
 
 def ensure_dirs():
@@ -88,6 +93,177 @@ def clean_issue_tags(values, max_items=24):
     return clean_list(labels, max_items=max_items)
 
 
+def clean_github_username(value):
+    username = str(value or "").strip().lstrip("@")
+    if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", username):
+        return username
+    return ""
+
+
+def parse_github_repo(repo_url):
+    value = str(repo_url or "").strip()
+    if not value:
+        return "", "", ""
+    if value.startswith("git@github.com:"):
+        value = "https://github.com/" + value.split(":", 1)[1]
+    parsed = urllib.parse.urlparse(value if "://" in value else f"https://github.com/{value}")
+    path = parsed.path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = [part for part in path.split("/") if part]
+    if parsed.netloc and parsed.netloc.lower() != "github.com":
+        return "", "", ""
+    if len(parts) < 2:
+        return "", "", ""
+    owner, repo = parts[0], parts[1]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
+        return "", "", ""
+    return owner, repo, f"https://github.com/{owner}/{repo}"
+
+
+def clean_assignee_mapping(value):
+    mapping = {}
+    source = value if isinstance(value, dict) else {}
+    for name, username in source.items():
+        clean_name = re.sub(r"\s+", " ", str(name or "")).strip()[:80]
+        clean_username = clean_github_username(username)
+        if clean_name and clean_username:
+            mapping[clean_name] = clean_username
+    return mapping
+
+
+def clean_status_mapping(value):
+    mapping = {}
+    source = value if isinstance(value, dict) else {}
+    for status, reason in source.items():
+        clean_status = re.sub(r"\s+", " ", str(status or "")).strip()[:60]
+        clean_reason = str(reason or "").strip()
+        if clean_status and clean_reason in {"completed", "not_planned", "open"}:
+            mapping[clean_status] = clean_reason
+    return mapping
+
+
+def clean_repos(values, fallback_token="", existing_repos=None):
+    existing_map = {}
+    if existing_repos:
+        for er in existing_repos:
+            if isinstance(er, dict):
+                key = (er.get("owner", ""), er.get("repo", ""))
+                existing_map[key] = er.get("token", "") or ""
+    cleaned = []
+    for value in values if isinstance(values, list) else []:
+        if isinstance(value, dict):
+            owner, repo, repo_url = parse_github_repo(value.get("repoUrl") or "")
+            if not owner or not repo:
+                continue
+            token = str(value.get("token") or "").strip()
+            if not token:
+                # Check if existing repo had its own token
+                existing_token = existing_map.get((owner, repo), "")
+                if existing_token:
+                    token = existing_token
+                else:
+                    token = fallback_token
+            cleaned.append({
+                "name": str(value.get("name") or repo).strip()[:80],
+                "repoUrl": repo_url,
+                "owner": owner,
+                "repo": repo,
+                "token": token,
+                "enabled": bool(value.get("enabled", True)) and bool(token),
+                "assigneeMapping": clean_assignee_mapping(value.get("assigneeMapping", {})),
+            })
+    return cleaned
+
+
+def public_github_settings(settings):
+    public = dict(settings)
+    public.pop("token", None)
+    public["tokenSaved"] = bool(settings.get("token"))
+    # Strip tokens from repos list for public view
+    if "repos" in public:
+        stripped = []
+        for repo in settings.get("repos", []):
+            public_repo = {k: v for k, v in repo.items() if k != "token"}
+            public_repo["tokenSaved"] = bool(repo.get("token"))
+            stripped.append(public_repo)
+        public["repos"] = stripped
+    return public
+
+
+def default_github_settings():
+    return {
+        "enabled": False,
+        "repoUrl": "",
+        "owner": "",
+        "repo": "",
+        "token": "",
+        "assigneeMapping": {},
+        "statusMapping": {
+            "fixed": "completed",
+            "not doing": "not_planned",
+            "closed but not fixed": "not_planned",
+        },
+        "repos": [],
+        "activeRepoIndex": -1,
+        "lastTestedAt": "",
+        "lastTestOk": False,
+        "lastMessage": "",
+    }
+
+
+def read_github_settings(include_token=False):
+    settings = default_github_settings()
+    try:
+        saved = json.loads(GITHUB_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if isinstance(saved, dict):
+            owner, repo, repo_url = parse_github_repo(saved.get("repoUrl") or saved.get("repository") or "")
+            saved_status_mapping = clean_status_mapping(saved.get("statusMapping", {}))
+            settings.update(
+                {
+                    "enabled": bool(saved.get("enabled")),
+                    "repoUrl": repo_url,
+                    "owner": owner,
+                    "repo": repo,
+                    "token": str(saved.get("token") or ""),
+                    "assigneeMapping": clean_assignee_mapping(saved.get("assigneeMapping", {})),
+                    "statusMapping": saved_status_mapping if saved_status_mapping else settings["statusMapping"],
+                    "repos": clean_repos(saved.get("repos", [])),
+                    "activeRepoIndex": int(saved.get("activeRepoIndex", -1)),
+                    "lastTestedAt": str(saved.get("lastTestedAt") or ""),
+                    "lastTestOk": bool(saved.get("lastTestOk")),
+                    "lastMessage": str(saved.get("lastMessage") or ""),
+                }
+            )
+    except Exception:
+        pass
+    return settings if include_token else public_github_settings(settings)
+
+
+def write_github_settings(payload):
+    existing = read_github_settings(include_token=True)
+    owner, repo, repo_url = parse_github_repo(payload.get("repoUrl") or existing.get("repoUrl"))
+    token = str(payload.get("token", GITHUB_TOKEN_KEEP) or "").strip()
+    if token == GITHUB_TOKEN_KEEP:
+        token = existing.get("token", "")
+    settings = {
+        "enabled": bool(payload.get("enabled")) and bool(owner and repo and token),
+        "repoUrl": repo_url,
+        "owner": owner,
+        "repo": repo,
+        "token": token,
+        "assigneeMapping": clean_assignee_mapping(payload.get("assigneeMapping", existing.get("assigneeMapping", {}))),
+        "statusMapping": clean_status_mapping(payload.get("statusMapping", existing.get("statusMapping", {}))),
+        "repos": clean_repos(payload.get("repos", existing.get("repos", [])), fallback_token=token, existing_repos=existing.get("repos", [])),
+        "activeRepoIndex": int(payload.get("activeRepoIndex", existing.get("activeRepoIndex", -1))),
+        "lastTestedAt": str(payload.get("lastTestedAt") or existing.get("lastTestedAt") or ""),
+        "lastTestOk": bool(payload.get("lastTestOk", existing.get("lastTestOk", False))),
+        "lastMessage": str(payload.get("lastMessage") or existing.get("lastMessage") or ""),
+    }
+    GITHUB_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return settings
+
+
 def read_settings():
     settings = DEFAULT_SETTINGS.copy()
     try:
@@ -121,6 +297,282 @@ def write_settings(settings):
     }
     SETTINGS_PATH.write_text(json.dumps(next_settings, indent=2) + "\n", encoding="utf-8")
     return next_settings
+
+
+def github_request(settings, method, path, payload=None, expected=(200, 201, 204)):
+    token = settings.get("token", "")
+    if not token:
+        raise RuntimeError("GitHub token is missing")
+    body = None
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "BugNote",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(f"{GITHUB_API}{path}", data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=18) as response:
+            data = response.read().decode("utf-8")
+            if response.status not in expected:
+                raise RuntimeError(f"GitHub returned {response.status}")
+            return json.loads(data) if data else {}
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="ignore")
+        message = ""
+        try:
+            message = json.loads(details).get("message", "")
+        except Exception:
+            message = details[:180]
+        raise RuntimeError(message or f"GitHub returned {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Could not reach GitHub: {exc.reason}") from exc
+
+
+def issue_state_for_status(status, settings=None):
+    """
+    Map a BugNote status to GitHub issue state and state_reason.
+    Uses the configured statusMapping from github_settings, falling back
+    to 'open' with no state_reason if not mapped.
+    """
+    status_mapping = {}
+    if settings and isinstance(settings, dict):
+        status_mapping = settings.get("statusMapping", {})
+    if not status_mapping:
+        gh_settings = read_github_settings(include_token=True)
+        status_mapping = gh_settings.get("statusMapping", {})
+    clean_status = str(status or "").strip().casefold()
+    # Check configured mapping (case-insensitive)
+    for mapped_status, reason in status_mapping.items():
+        if mapped_status.casefold() == clean_status:
+            if reason == "open":
+                return "open", None
+            return "closed", reason
+    return "open", None
+
+
+def markdown_from_html(html, base_url):
+    template = re.sub(r"</(p|div|li|h[1-6])>", "\n", str(html or ""), flags=re.I)
+    template = re.sub(r"<br\s*/?>", "\n", template, flags=re.I)
+
+    def media_replacer(match):
+        tag = match.group(0)
+        src_match = re.search(r"\bsrc=[\"']([^\"']+)[\"']", tag, flags=re.I)
+        if not src_match:
+            return ""
+        src = absolute_media_url(src_match.group(1), base_url)
+        alt_match = re.search(r"\b(?:alt|data-name)=[\"']([^\"']+)[\"']", tag, flags=re.I)
+        label = html_unescape(alt_match.group(1)) if alt_match else "media"
+        if tag.lower().startswith("<video"):
+            return f"\n[Video: {label}]({src})\n"
+        return f"\n![{label}]({src})\n"
+
+    template = re.sub(r"<img\b[^>]*>|<video\b[\s\S]*?</video>", media_replacer, template, flags=re.I)
+    template = re.sub(r"<li\b[^>]*>", "- ", template, flags=re.I)
+    template = re.sub(r"<[^>]+>", "", template)
+    template = html_unescape(template)
+    template = re.sub(r"\n{3,}", "\n\n", template)
+    return template.strip()
+
+
+def html_unescape(value):
+    return (
+        str(value or "")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+    )
+
+
+def absolute_media_url(url, base_url):
+    parsed = urllib.parse.urlparse(str(url or ""))
+    if parsed.scheme in {"http", "https"}:
+        return url
+    base = str(base_url or "").rstrip("/")
+    if not base:
+        return url
+    return urllib.parse.urljoin(base + "/", str(url or "").lstrip("/"))
+
+
+def github_issue_body(issue, base_url):
+    lines = []
+    if issue.get("reporter"):
+        lines.append(f"> **Reported by:** {issue['reporter']}")
+    if issue.get("status"):
+        lines.append(f"> **BugNote status:** {issue['status']}")
+    if lines:
+        lines.append("")
+    description = markdown_from_html(issue.get("descriptionHtml", ""), base_url)
+    if description:
+        lines.append(description)
+    return "\n".join(lines).strip() or "_No description._"
+
+
+def sync_github_labels(settings, labels):
+    owner, repo = settings.get("owner"), settings.get("repo")
+    if not owner or not repo:
+        return
+    for label in labels:
+        clean_label = str(label or "").strip()
+        if not clean_label:
+            continue
+        try:
+            github_request(settings, "GET", f"/repos/{owner}/{repo}/labels/{urllib.parse.quote(clean_label, safe='')}")
+        except RuntimeError:
+            github_request(settings, "POST", f"/repos/{owner}/{repo}/labels", {"name": clean_label, "color": "0f8b8d"})
+
+
+def valid_github_assignee(settings, username):
+    owner, repo = settings.get("owner"), settings.get("repo")
+    username = clean_github_username(username)
+    if not username:
+        return False
+    github_request(settings, "GET", f"/repos/{owner}/{repo}/assignees/{username}", expected=(204,))
+    return True
+
+
+def github_payload_for_issue(issue, settings, base_url):
+    labels = clean_issue_tags(issue.get("tags", []), max_items=24)
+    assignees = []
+    assigned_to = str(issue.get("assignedTo") or "").strip()
+    if assigned_to:
+        username = settings.get("assigneeMapping", {}).get(assigned_to, "")
+        if not username:
+            raise RuntimeError(f"Add a GitHub username for assignee '{assigned_to}' in Settings.")
+        valid_github_assignee(settings, username)
+        assignees = [username]
+    state, state_reason = issue_state_for_status(issue.get("status"), settings)
+    payload = {
+        "title": issue.get("title") or f"BugNote issue #{issue.get('number')}",
+        "body": github_issue_body(issue, base_url),
+        "labels": labels,
+        "assignees": assignees,
+    }
+    return payload, labels, state, state_reason
+
+
+def resolve_github_settings_for_issue(issue):
+    """Resolve the GitHub settings to use for a given issue.
+    
+    If the issue already has a github reference with owner/repo, looks it up
+    in the repos list. Otherwise returns the active repo or the main settings.
+    """
+    settings = read_github_settings(include_token=True)
+    github_ref = issue.get("github") if isinstance(issue.get("github"), dict) else {}
+    ref_owner = github_ref.get("owner", "")
+    ref_repo = github_ref.get("repo", "")
+    
+    repos = settings.get("repos", [])
+    
+    # If the issue has a previous github reference, find matching repo
+    if ref_owner and ref_repo:
+        for repo_config in repos:
+            if repo_config.get("owner") == ref_owner and repo_config.get("repo") == ref_repo:
+                return repo_config, settings.get("statusMapping", {})
+    
+    # Try the active repo index
+    active_index = settings.get("activeRepoIndex", -1)
+    if 0 <= active_index < len(repos):
+        repo_config = repos[active_index]
+        if repo_config.get("enabled"):
+            return repo_config, settings.get("statusMapping", {})
+    
+    # Fall back to main settings
+    if settings.get("enabled") and settings.get("owner") and settings.get("repo") and settings.get("token"):
+        return settings, settings.get("statusMapping", {})
+    
+    # No active settings
+    return None, settings.get("statusMapping", {})
+
+
+def sync_issue_to_github(issue, base_url):
+    all_settings = read_github_settings(include_token=True)
+    
+    # Try to resolve the right settings for this issue
+    repo_settings, status_mapping = resolve_github_settings_for_issue(issue)
+    
+    if not repo_settings or not repo_settings.get("enabled"):
+        return issue
+    
+    if not repo_settings.get("owner") or not repo_settings.get("repo") or not repo_settings.get("token"):
+        raise RuntimeError("GitHub is enabled but repo or token is missing.")
+    
+    # Merge status mapping into repo_settings for issue_state_for_status
+    if status_mapping:
+        repo_settings = {**repo_settings, "statusMapping": status_mapping}
+
+    payload, labels, state, state_reason = github_payload_for_issue(issue, repo_settings, base_url)
+    sync_github_labels(repo_settings, labels)
+    owner, repo = repo_settings["owner"], repo_settings["repo"]
+    github_ref = issue.get("github") if isinstance(issue.get("github"), dict) else {}
+    issue_number_value = github_ref.get("number")
+
+    if issue_number_value:
+        github_issue = github_request(repo_settings, "PATCH", f"/repos/{owner}/{repo}/issues/{int(issue_number_value)}", payload)
+    else:
+        github_issue = github_request(repo_settings, "POST", f"/repos/{owner}/{repo}/issues", payload)
+        issue_number_value = github_issue.get("number")
+
+    state_payload = {"state": state}
+    if state_reason:
+        state_payload["state_reason"] = state_reason
+    github_issue = github_request(repo_settings, "PATCH", f"/repos/{owner}/{repo}/issues/{int(issue_number_value)}", state_payload)
+    issue["github"] = {
+        "owner": owner,
+        "repo": repo,
+        "number": github_issue.get("number", issue_number_value),
+        "url": github_issue.get("html_url", github_ref.get("url", "")),
+        "state": github_issue.get("state", state),
+        "stateReason": github_issue.get("state_reason", state_reason or ""),
+        "syncedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    return issue
+
+
+def close_github_issue_on_delete(issue_data):
+    """Close a GitHub issue when the BugNote issue is deleted."""
+    github_ref = issue_data.get("github") if isinstance(issue_data.get("github"), dict) else {}
+    issue_number_value = github_ref.get("number")
+    owner = github_ref.get("owner", "")
+    repo = github_ref.get("repo", "")
+    if not issue_number_value or not owner or not repo:
+        return
+    
+    # Find the right settings for this repo
+    all_settings = read_github_settings(include_token=True)
+    repo_settings = None
+    for rc in all_settings.get("repos", []):
+        if rc.get("owner") == owner and rc.get("repo") == repo and rc.get("token"):
+            repo_settings = rc
+            break
+    if not repo_settings and all_settings.get("owner") == owner and all_settings.get("repo") == repo and all_settings.get("token"):
+        repo_settings = all_settings
+    
+    if not repo_settings:
+        return
+    
+    close_payload = {"state": "closed", "state_reason": "not_planned"}
+    github_request(repo_settings, "PATCH", f"/repos/{owner}/{repo}/issues/{int(issue_number_value)}", close_payload)
+
+
+def test_github_connection(settings):
+    owner, repo = settings.get("owner"), settings.get("repo")
+    if not owner or not repo:
+        raise RuntimeError("Enter a GitHub repo link like https://github.com/owner/repo.")
+    github_request(settings, "GET", f"/repos/{owner}/{repo}")
+    for local_name, username in settings.get("assigneeMapping", {}).items():
+        if username:
+            try:
+                valid_github_assignee(settings, username)
+            except RuntimeError as exc:
+                raise RuntimeError(f"{username} is not assignable for {local_name}: {exc}") from exc
+    return True
 
 
 def issue_number(issue_id):
@@ -182,6 +634,8 @@ def normalize_issue(issue, path=None):
         "tags": clean_issue_tags(issue.get("tags", []), max_items=24),
         "descriptionHtml": str(issue.get("descriptionHtml") or "").strip(),
         "media": issue.get("media", []) if isinstance(issue.get("media", []), list) else [],
+        "github": issue.get("github", {}) if isinstance(issue.get("github", {}), dict) else {},
+        "githubError": str(issue.get("githubError") or "").strip(),
         "createdAt": str(issue.get("createdAt") or "").strip(),
         "updatedAt": str(issue.get("updatedAt") or issue.get("createdAt") or "").strip(),
     }
@@ -221,6 +675,8 @@ def media_only_issue(path):
         "tags": [],
         "descriptionHtml": "",
         "media": media,
+        "github": {},
+        "githubError": "",
         "createdAt": created_at,
         "updatedAt": created_at,
     }
@@ -265,6 +721,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json({"id": issue_id, "number": issue_number(issue_id)})
         if self.api_path == "/api/settings":
             return self.json(read_settings())
+        if self.api_path == "/api/github-settings":
+            return self.json(read_github_settings())
         if self.api_path == "/api/health":
             return self.json({"ok": True})
         return super().do_GET()
@@ -276,6 +734,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.save_media()
         if self.api_path == "/api/settings":
             return self.save_settings()
+        if self.api_path == "/api/github-settings":
+            return self.save_github_settings()
+        if self.api_path == "/api/github-test":
+            return self.test_github()
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_DELETE(self):
@@ -285,6 +747,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(HTTPStatus.NOT_FOUND)
         issue_id = int(match.group(1))
         path = issue_path(issue_id)
+        
+        # Close the GitHub issue if it exists
+        issue_data = read_issue(path) if path.exists() else None
+        if issue_data:
+            github_ref = issue_data.get("github") if isinstance(issue_data.get("github"), dict) else {}
+            if github_ref.get("number"):
+                try:
+                    close_github_issue_on_delete(issue_data)
+                except Exception:
+                    pass
+        
         if path.exists():
             path.unlink()
         media_path = MEDIA_DIR / f"issue-{issue_number(issue_id)}"
@@ -320,21 +793,28 @@ class Handler(SimpleHTTPRequestHandler):
             issue_id = int(payload.get("id") or next_issue_id())
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             existing = read_issue(issue_path(issue_id)) or {}
-            issue = {
-                "id": issue_id,
-                "number": issue_number(issue_id),
-                "title": str(payload.get("title", "")).strip(),
-                "reporter": str(payload.get("reporter", "")).strip(),
-                "assignedTo": str(payload.get("assignedTo", "")).strip(),
-                "status": str(payload.get("status", "open")).strip() or "open",
-                "tags": clean_list(payload.get("tags", []), max_items=24),
-                "descriptionHtml": str(payload.get("descriptionHtml", "")).strip(),
-                "media": payload.get("media", []),
-                "createdAt": existing.get("createdAt") or now,
-                "updatedAt": now,
-            }
-            if not issue["title"]:
-                return self.json({"error": "Title is required"}, 400)
+        issue = {
+            "id": issue_id,
+            "number": issue_number(issue_id),
+            "title": str(payload.get("title", "")).strip(),
+            "reporter": str(payload.get("reporter", "")).strip(),
+            "assignedTo": str(payload.get("assignedTo", "")).strip(),
+            "status": str(payload.get("status", "open")).strip() or "open",
+            "tags": clean_list(payload.get("tags", []), max_items=24),
+            "descriptionHtml": str(payload.get("descriptionHtml", "")).strip(),
+            "media": payload.get("media", []),
+            "github": existing.get("github", {}) if isinstance(existing.get("github", {}), dict) else {},
+            "githubError": "",
+            "createdAt": existing.get("createdAt") or now,
+            "updatedAt": now,
+        }
+        if not issue["title"]:
+            return self.json({"error": "Title is required"}, 400)
+        try:
+            issue = sync_issue_to_github(issue, self.request_base_url())
+        except RuntimeError as exc:
+            issue["githubError"] = str(exc)
+        with FILE_LOCK:
             issue_path(issue_id).write_text(json.dumps(issue, indent=2) + "\n", encoding="utf-8")
         self.json({"ok": True, "issue": issue})
 
@@ -347,6 +827,44 @@ class Handler(SimpleHTTPRequestHandler):
         with FILE_LOCK:
             settings = write_settings(payload)
         self.json({"ok": True, "settings": settings})
+
+    def save_github_settings(self):
+        ensure_dirs()
+        try:
+            payload = self.read_json()
+        except ValueError as exc:
+            return self.json({"error": str(exc)}, 413)
+        with FILE_LOCK:
+            settings = write_github_settings(payload)
+        self.json({"ok": True, "settings": public_github_settings(settings)})
+
+    def test_github(self):
+        ensure_dirs()
+        try:
+            payload = self.read_json()
+        except ValueError as exc:
+            return self.json({"error": str(exc)}, 413)
+        with FILE_LOCK:
+            settings = write_github_settings(payload)
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        try:
+            test_github_connection(settings)
+            settings["lastTestedAt"] = now
+            settings["lastTestOk"] = True
+            settings["lastMessage"] = "Connection works."
+            write_github_settings(settings)
+            return self.json({"ok": True, "message": settings["lastMessage"], "settings": public_github_settings(settings)})
+        except RuntimeError as exc:
+            settings["lastTestedAt"] = now
+            settings["lastTestOk"] = False
+            settings["lastMessage"] = str(exc)
+            write_github_settings(settings)
+            return self.json({"ok": False, "error": str(exc), "settings": public_github_settings(settings)}, 400)
+
+    def request_base_url(self):
+        proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip() or "http"
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
+        return f"{proto}://{host}" if host else ""
 
     def save_media(self):
         ensure_dirs()

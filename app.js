@@ -1,4 +1,4 @@
-const defaultStatuses = ["open", "fixed", "closed but not fixed", "not doing"];
+const defaultStatuses = ["Open", "Fixed", "Not Doing"];
 const defaultReporters = ["Habib"];
 const defaultAssignees = [];
 const defaultTags = [];
@@ -27,6 +27,15 @@ const els = {
   assigneeSettingsList: document.querySelector("#assigneeSettingsList"),
   tagSettingsList: document.querySelector("#tagSettingsList"),
   statusSettingsList: document.querySelector("#statusSettingsList"),
+  settingsMessage: document.querySelector("#settingsMessage"),
+  githubForm: document.querySelector("#githubForm"),
+  githubRepoUrl: document.querySelector("#githubRepoUrl"),
+  githubToken: document.querySelector("#githubToken"),
+  githubEnabled: document.querySelector("#githubEnabled"),
+  githubStatus: document.querySelector("#githubStatus"),
+  testGithub: document.querySelector("#testGithub"),
+  assigneeMapTable: document.querySelector("#assigneeMapTable"),
+  statusMapTable: document.querySelector("#statusMapTable"),
   settingForms: document.querySelectorAll("[data-setting-form]"),
   newTagColor: document.querySelector("#newTagColor"),
   issueDialog: document.querySelector("#issueDialog"),
@@ -48,6 +57,7 @@ const els = {
   saveIssue: document.querySelector("#saveIssue"),
   dangerMenu: document.querySelector("#dangerMenu"),
   deleteIssue: document.querySelector("#deleteIssue"),
+  viewGithubIssue: document.querySelector("#viewGithubIssue"),
   formError: document.querySelector("#formError"),
   openCamera: document.querySelector("#openCamera"),
   cameraDialog: document.querySelector("#cameraDialog"),
@@ -60,6 +70,13 @@ const els = {
   recordingStatus: document.querySelector("#recordingStatus"),
   recordingLabel: document.querySelector("#recordingLabel"),
   recordingTimer: document.querySelector("#recordingTimer"),
+  reposList: document.querySelector("#reposList"),
+  repoForm: document.querySelector("#repoForm"),
+  repoName: document.querySelector("#repoName"),
+  repoUrl: document.querySelector("#repoUrl"),
+  repoTokens: document.querySelector("#repoTokens"),
+  repoEnabled: document.querySelector("#repoEnabled"),
+  repoAssignees: document.querySelector("#repoAssignees"),
 };
 
 let issues = [];
@@ -68,6 +85,17 @@ let settings = {
   assignees: [...defaultAssignees],
   tags: [...defaultTags],
   statuses: [...defaultStatuses],
+};
+let githubSettings = {
+  enabled: false,
+  repoUrl: "",
+  tokenSaved: false,
+  assigneeMapping: {},
+  statusMapping: {},
+  repos: [],
+  activeRepoIndex: -1,
+  lastTestOk: false,
+  lastMessage: "",
 };
 let editingId = null;
 let draftIssueId = null;
@@ -90,7 +118,7 @@ let busyMessage = "";
 init();
 
 async function init() {
-  await Promise.all([loadIssues(), loadSettings()]);
+  await Promise.all([loadIssues(), loadSettings(), loadGithubSettings()]);
   normalizePeopleReferences();
   bindEvents();
   render();
@@ -105,6 +133,11 @@ function bindEvents() {
   els.searchInput.addEventListener("input", renderIssues);
   els.openCreateIssue.addEventListener("click", () => openIssueDialog());
   els.settingForms.forEach((form) => form.addEventListener("submit", addSettingItem));
+  els.githubForm.addEventListener("submit", saveGithubSettings);
+  els.testGithub.addEventListener("click", testGithubConnection);
+  els.githubEnabled.addEventListener("change", saveGithubSettings);
+  els.repoForm?.addEventListener("submit", addRepo);
+  if (els.repoEnabled) els.repoEnabled.addEventListener("change", saveRepos);
   els.closeDialog.addEventListener("click", closeIssueDialog);
   els.cancelIssue.addEventListener("click", closeIssueDialog);
   els.issueForm.addEventListener("submit", saveIssue);
@@ -143,6 +176,11 @@ async function loadSettings() {
   settings = normalizeSettings(data);
 }
 
+async function loadGithubSettings() {
+  const data = await apiJson("/api/github-settings");
+  githubSettings = normalizeGithubSettings(data);
+}
+
 function render() {
   syncOptions();
   renderIssues();
@@ -176,6 +214,7 @@ function renderSettings() {
   renderSettingsList(els.assigneeSettingsList, "assignees", sortedAssignees());
   renderSettingsList(els.tagSettingsList, "tags", sortedTagLabels(), true);
   renderSettingsList(els.statusSettingsList, "statuses", sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]));
+  renderGithubSettings();
 }
 
 function renderSettingsList(container, type, values, useChips = false) {
@@ -211,12 +250,337 @@ function renderSettingsList(container, type, values, useChips = false) {
     button.className = "quiet-button";
     button.type = "button";
     button.textContent = "Remove";
-    button.dataset.protected = String(isProtectedSetting(type, value));
+    const isProtected = isProtectedSetting(type, value);
+    const isUsedTag = type === "tags" && isTagInUse(value);
+    button.dataset.protected = String(isProtected);
+    button.dataset.used = String(isUsedTag);
     button.disabled = button.dataset.protected === "true";
+    if (isUsedTag) button.title = "This tag is used by an issue.";
     button.addEventListener("click", () => removeSettingItem(type, value));
     row.appendChild(button);
     container.appendChild(row);
   });
+}
+
+function renderGithubSettings() {
+  els.githubRepoUrl.value = githubSettings.repoUrl || "";
+  els.githubEnabled.checked = !!githubSettings.enabled;
+  els.githubEnabled.disabled = isBusy();
+  els.githubToken.placeholder = githubSettings.tokenSaved ? "Token saved. Paste a new token to replace." : "Paste a GitHub token";
+
+  const statusClassName = githubSettings.lastTestOk ? "ok" : githubSettings.lastMessage ? "bad" : "";
+  els.githubStatus.className = `github-status ${statusClassName}`.trim();
+  els.githubStatus.textContent = githubStatusText();
+
+  renderAssigneeMap();
+  renderStatusMap();
+  renderReposList();
+}
+
+function renderAssigneeMap() {
+  const assignees = sortedAssignees();
+  els.assigneeMapTable.innerHTML = "";
+  if (!assignees.length) {
+    const empty = document.createElement("div");
+    empty.className = "settings-empty";
+    empty.textContent = "Add assignees, then map them to GitHub usernames.";
+    els.assigneeMapTable.appendChild(empty);
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "map-row map-header";
+  header.innerHTML = "<span>BugNote name</span><span>GitHub username</span>";
+  els.assigneeMapTable.appendChild(header);
+
+  assignees.forEach((name) => {
+    const row = document.createElement("div");
+    row.className = "map-row";
+    const label = document.createElement("span");
+    label.textContent = name;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = githubSettings.assigneeMapping?.[name] || "";
+    input.placeholder = `${slugifyName(name)}-github`;
+    input.autocomplete = "off";
+    input.dataset.assigneeName = name;
+    input.addEventListener("change", () => {
+      githubSettings.assigneeMapping = readAssigneeMapping();
+      renderGithubSettings();
+    });
+    row.append(label, input);
+    els.assigneeMapTable.appendChild(row);
+  });
+}
+
+function renderStatusMap() {
+  if (!els.statusMapTable) return;
+  const statuses = sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]);
+  els.statusMapTable.innerHTML = "";
+  if (!statuses.length) {
+    const empty = document.createElement("div");
+    empty.className = "settings-empty";
+    empty.textContent = "Add statuses in the Statuses panel, then map them to GitHub state reasons.";
+    els.statusMapTable.appendChild(empty);
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "map-row map-header";
+  header.innerHTML = "<span>BugNote status</span><span>GitHub state reason</span>";
+  els.statusMapTable.appendChild(header);
+
+  statuses.forEach((status) => {
+    const row = document.createElement("div");
+    row.className = "map-row";
+    const label = document.createElement("span");
+    label.textContent = status;
+    const select = document.createElement("select");
+    const currentValue = githubSettings.statusMapping?.[status] || "";
+    ["", "open", "closed/not_planned", "closed/completed"].forEach((reason) => {
+      const option = document.createElement("option");
+      option.value = reason === "closed/not_planned" ? "not_planned" : reason === "closed/completed" ? "completed" : reason;
+      option.textContent = reason === "" ? "⚠️ No action (stays open)" : reason === "open" ? "Keep open" : reason === "closed/not_planned" ? "Close — won't fix" : "Close — completed";
+      if (option.value === currentValue) option.selected = true;
+      select.appendChild(option);
+    });
+    select.dataset.statusName = status;
+    select.addEventListener("change", () => {
+      githubSettings.statusMapping = readStatusMapping();
+      saveGithubSettingsStatusOnly();
+    });
+    row.append(label, select);
+    els.statusMapTable.appendChild(row);
+  });
+}
+
+function readStatusMapping() {
+  const mapping = {};
+  if (!els.statusMapTable) return mapping;
+  els.statusMapTable.querySelectorAll("[data-status-name]").forEach((select) => {
+    const value = select.value;
+    if (value) mapping[select.dataset.statusName] = value;
+  });
+  return mapping;
+}
+
+async function saveGithubSettingsStatusOnly() {
+  try {
+    const result = await apiJson("/api/github-settings", {
+      method: "POST",
+      body: { statusMapping: readStatusMapping() },
+    });
+    githubSettings = normalizeGithubSettings(result.settings);
+    renderGithubSettings();
+  } catch {
+    // silently fail for status mapping saves
+  }
+}
+
+function renderReposList() {
+  if (!els.reposList) return;
+  const repos = Array.isArray(githubSettings.repos) ? githubSettings.repos : [];
+  els.reposList.innerHTML = "";
+  if (!repos.length) {
+    const empty = document.createElement("div");
+    empty.className = "settings-empty";
+    empty.textContent = "No repositories configured. Add repos below to sync issues to multiple GitHub repos.";
+    els.reposList.appendChild(empty);
+    return;
+  }
+
+  repos.forEach((repo, index) => {
+    const row = document.createElement("div");
+    row.className = "repo-row";
+    row.dataset.repoIndex = index;
+
+    const isActive = index === githubSettings.activeRepoIndex;
+
+    const info = document.createElement("div");
+    info.className = "repo-info";
+    info.innerHTML = `<strong>${escHtml(repo.name || repo.repo)}</strong><span class="repo-url-text">${escHtml(repo.repoUrl || "")}</span>`;
+
+    const toggle = document.createElement("label");
+    toggle.className = "repo-toggle";
+    const toggleInput = document.createElement("input");
+    toggleInput.type = "checkbox";
+    toggleInput.checked = isActive;
+    toggleInput.addEventListener("change", () => {
+      if (toggleInput.checked) setActiveRepo(index);
+      else setActiveRepo(-1);
+    });
+    const toggleSpan = document.createElement("span");
+    toggleSpan.textContent = "Default";
+    toggle.append(toggleInput, toggleSpan);
+
+    const actions = document.createElement("div");
+    actions.className = "repo-actions";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "quiet-button";
+    removeBtn.type = "button";
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => removeRepo(index));
+    actions.append(removeBtn);
+
+    row.append(info, toggle, actions);
+    els.reposList.appendChild(row);
+  });
+}
+
+async function addRepo(event) {
+  event.preventDefault();
+  const repoUrl = els.repoUrl?.value.trim() || "";
+  if (!repoUrl) return;
+  const name = els.repoName?.value.trim() || "";
+
+  const repos = Array.isArray(githubSettings.repos) ? [...githubSettings.repos] : [];
+  repos.push({ name, repoUrl, enabled: false, assigneeMapping: {} });
+  githubSettings.repos = repos;
+  els.repoName.value = "";
+  els.repoUrl.value = "";
+  // Auto-set as active if this is the first repo
+  if (repos.length === 1) {
+    githubSettings.activeRepoIndex = 0;
+  }
+  await saveRepos();
+}
+
+async function removeRepo(index) {
+  const repos = Array.isArray(githubSettings.repos) ? [...githubSettings.repos] : [];
+  repos.splice(index, 1);
+  githubSettings.repos = repos;
+  if (githubSettings.activeRepoIndex >= repos.length) {
+    githubSettings.activeRepoIndex = repos.length - 1;
+  }
+  await saveRepos();
+}
+
+async function setActiveRepo(index) {
+  githubSettings.activeRepoIndex = typeof index === "number" && index >= 0 && index < (githubSettings.repos || []).length ? index : -1;
+  await saveRepos();
+}
+
+async function saveRepos() {
+  try {
+    const payload = { repos: githubSettings.repos, activeRepoIndex: githubSettings.activeRepoIndex };
+    const result = await apiJson("/api/github-settings", { method: "POST", body: payload });
+    githubSettings = normalizeGithubSettings(result.settings);
+    renderGithubSettings();
+  } catch (error) {
+    showGithubMessage(error.message || "Could not save repos.", false);
+  }
+}
+
+function escHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function githubStatusText() {
+  if (githubSettings.lastMessage) return githubSettings.lastMessage;
+  if (githubSettings.tokenSaved) return "Token saved. Test the connection before enabling sync.";
+  return "Not connected.";
+}
+
+function missingMappedAssignees(mapping = githubSettings.assigneeMapping) {
+  mapping = mapping || {};
+  return sortedAssignees().filter((name) => !normalizeGithubUsername(mapping[name] || ""));
+}
+
+function readAssigneeMapping() {
+  const mapping = {};
+  els.assigneeMapTable.querySelectorAll("[data-assignee-name]").forEach((input) => {
+    const username = normalizeGithubUsername(input.value);
+    if (username) mapping[input.dataset.assigneeName] = username;
+  });
+  return mapping;
+}
+
+function githubSettingsPayload() {
+  const payload = {
+    repoUrl: els.githubRepoUrl.value.trim(),
+    enabled: els.githubEnabled.checked,
+    assigneeMapping: readAssigneeMapping(),
+    statusMapping: readStatusMapping(),
+    repos: githubSettings.repos || [],
+    activeRepoIndex: githubSettings.activeRepoIndex,
+  };
+  const token = els.githubToken.value.trim();
+  if (token) payload.token = token;
+  return payload;
+}
+
+async function saveGithubSettings(event) {
+  event?.preventDefault();
+  const payload = githubSettingsPayload();
+  const wantsEnable = payload.enabled;
+  try {
+    if (wantsEnable) {
+      const reason = githubEnableBlocker(payload);
+      if (reason) throw new Error(reason);
+      if (needsGithubRetest(payload)) {
+        await withBusy("Testing GitHub connection...", async () => {
+          const result = await apiJson("/api/github-test", { method: "POST", body: { ...payload, enabled: false } });
+          githubSettings = normalizeGithubSettings(result.settings);
+          els.githubToken.value = "";
+        });
+      }
+      payload.enabled = true;
+    }
+    await withBusy("Saving GitHub settings...", async () => {
+      const result = await apiJson("/api/github-settings", { method: "POST", body: payload });
+      githubSettings = normalizeGithubSettings(result.settings);
+      els.githubToken.value = "";
+    });
+    render();
+  } catch (error) {
+    if (wantsEnable) {
+      els.githubEnabled.checked = false;
+      githubSettings.enabled = false;
+    }
+    showGithubMessage(error.message || "GitHub settings could not be saved.", false);
+  }
+}
+
+function githubEnableBlocker(payload) {
+  if (!payload.repoUrl) return "Add the GitHub repository link first.";
+  if (!payload.token && !githubSettings.tokenSaved) return "Paste and save a GitHub token first.";
+  const missing = missingMappedAssignees(payload.assigneeMapping);
+  if (missing.length) return `Map GitHub usernames for: ${missing.join(", ")}.`;
+  return "";
+}
+
+function needsGithubRetest(payload) {
+  return (
+    !!payload.token ||
+    payload.repoUrl !== githubSettings.repoUrl ||
+    JSON.stringify(payload.assigneeMapping || {}) !== JSON.stringify(githubSettings.assigneeMapping || {}) ||
+    !githubSettings.lastTestOk
+  );
+}
+
+async function testGithubConnection() {
+  const payload = githubSettingsPayload();
+  payload.enabled = false;
+  try {
+    await withBusy("Testing GitHub connection...", async () => {
+      const result = await apiJson("/api/github-test", { method: "POST", body: payload });
+      githubSettings = normalizeGithubSettings(result.settings);
+      els.githubToken.value = "";
+    });
+    render();
+  } catch (error) {
+    await loadGithubSettings().catch(() => {});
+    showGithubMessage(error.message || "GitHub connection failed.", false);
+    render();
+  }
+}
+
+function showGithubMessage(message, ok) {
+  githubSettings.lastMessage = message;
+  githubSettings.lastTestOk = !!ok;
+  renderGithubSettings();
 }
 
 async function addSettingItem(event) {
@@ -238,12 +602,28 @@ async function addSettingItem(event) {
 }
 
 async function removeSettingItem(type, value) {
+  if (type === "tags" && isTagInUse(value)) {
+    showSettingsMessage(`"${value}" is used by an issue. Remove it from those issues before deleting the tag.`, false);
+    return;
+  }
   if (type === "tags") {
     settings.tags = settings.tags.filter((tag) => tag.label !== value);
   } else {
     settings[type] = (settings[type] || []).filter((item) => item !== value);
   }
   await saveSettings();
+}
+
+function isTagInUse(value) {
+  const key = normalizeName(value || "").toLowerCase();
+  return !!key && issues.some((issue) => (issue.tags || []).some((tag) => normalizeName(tag).toLowerCase() === key));
+}
+
+function showSettingsMessage(message, ok = true) {
+  els.settingsMessage.hidden = false;
+  els.settingsMessage.textContent = message;
+  els.settingsMessage.classList.toggle("bad", !ok);
+  els.settingsMessage.classList.toggle("ok", !!ok);
 }
 
 async function updateTagColor(label, color) {
@@ -299,6 +679,8 @@ function normalizeIssue(issue) {
     tags: Array.isArray(issue.tags) ? issue.tags.map(issueTagLabel).filter(Boolean) : [],
     descriptionHtml: String(issue.descriptionHtml || ""),
     media: Array.isArray(issue.media) ? issue.media : [],
+    github: issue.github && typeof issue.github === "object" ? issue.github : {},
+    githubError: String(issue.githubError || ""),
     createdAt: issue.createdAt || "",
     updatedAt: issue.updatedAt || issue.createdAt || "",
   };
@@ -524,6 +906,7 @@ async function openIssueDialog(id = null) {
   els.dangerMenu.hidden = !issue;
   els.dangerMenu.open = false;
   els.formError.textContent = "";
+  syncGithubIssueLink(issue);
   els.storageHint.textContent = `Images and videos will be written to media/issue-${String(draftIssueId).padStart(4, "0")}/`;
   toggleNewReporter();
   els.issueDialog.showModal();
@@ -580,7 +963,9 @@ async function saveIssue(event) {
 async function deleteCurrentIssue() {
   if (!editingId) return;
   if (isBusy() || isRecording()) return;
-  if (!confirm(`Delete issue #${String(editingId).padStart(4, "0")} and its media folder?`)) return;
+  const issue = issues.find((item) => item.id === editingId);
+  const githubNote = issue?.github?.url ? " The GitHub issue will be closed." : "";
+  if (!confirm(`Delete issue #${String(editingId).padStart(4, "0")} and its media folder?${githubNote}`)) return;
   try {
     await withBusy("Deleting issue...", async () => {
       await apiJson(`/api/issues/${editingId}`, { method: "DELETE" });
@@ -595,6 +980,16 @@ async function deleteCurrentIssue() {
 
 function showError(message) {
   els.formError.textContent = message;
+}
+
+function syncGithubIssueLink(issue) {
+  const url = issue?.github?.url || "";
+  els.viewGithubIssue.hidden = !url;
+  els.viewGithubIssue.href = url || "#";
+  els.viewGithubIssue.textContent = issue?.github?.number ? `View on GitHub #${issue.github.number}` : "View on GitHub";
+  if (issue?.githubError && !url) {
+    els.formError.textContent = `GitHub sync failed: ${issue.githubError}`;
+  }
 }
 
 function resolveReporter() {
@@ -654,6 +1049,57 @@ function normalizeSettings(data = {}) {
     tags: sortedTagObjects([...(Array.isArray(data.tags) ? data.tags : defaultTags)].map(normalizeTag)),
     statuses: sortedValues([...defaultStatuses, ...(Array.isArray(data.statuses) ? data.statuses : [])]),
   };
+}
+
+function normalizeGithubSettings(data = {}) {
+  const repos = Array.isArray(data.repos) ? data.repos.map(normalizeRepo) : [];
+  return {
+    enabled: !!data.enabled,
+    repoUrl: String(data.repoUrl || ""),
+    owner: String(data.owner || ""),
+    repo: String(data.repo || ""),
+    tokenSaved: !!data.tokenSaved,
+    assigneeMapping: normalizeAssigneeMapping(data.assigneeMapping),
+    statusMapping: normalizeStatusMapping(data.statusMapping),
+    repos,
+    activeRepoIndex: repos.length ? Math.min(Number(data.activeRepoIndex) || 0, repos.length - 1) : -1,
+    lastTestOk: !!data.lastTestOk,
+    lastTestedAt: String(data.lastTestedAt || ""),
+    lastMessage: String(data.lastMessage || ""),
+  };
+}
+
+function normalizeRepo(repo = {}) {
+  return {
+    name: String(repo.name || repo.repo || ""),
+    repoUrl: String(repo.repoUrl || ""),
+    owner: String(repo.owner || ""),
+    repo: String(repo.repo || ""),
+    tokenSaved: !!repo.tokenSaved,
+    enabled: !!repo.enabled,
+    assigneeMapping: normalizeAssigneeMapping(repo.assigneeMapping),
+  };
+}
+
+function normalizeStatusMapping(mapping = {}) {
+  const clean = {};
+  Object.entries(mapping || {}).forEach(([status, reason]) => {
+    const cleanStatus = normalizeName(String(status || ""));
+    if (cleanStatus && ["completed", "not_planned", "open"].includes(String(reason || ""))) {
+      clean[cleanStatus] = reason;
+    }
+  });
+  return clean;
+}
+
+function normalizeAssigneeMapping(mapping = {}) {
+  const clean = {};
+  Object.entries(mapping || {}).forEach(([name, username]) => {
+    const cleanName = normalizeName(String(name || ""));
+    const cleanUsername = normalizeGithubUsername(username);
+    if (cleanName && cleanUsername) clean[cleanName] = cleanUsername;
+  });
+  return clean;
 }
 
 function normalizePeopleReferences() {
@@ -1183,6 +1629,13 @@ function syncBusyUi() {
       control.disabled = busy;
     });
   });
+  els.githubForm.querySelectorAll("input, button").forEach((control) => {
+    control.disabled = busy;
+  });
+  els.githubEnabled.disabled = busy;
+  els.assigneeMapTable.querySelectorAll("input").forEach((control) => {
+    control.disabled = busy;
+  });
   document.querySelectorAll(".settings-row button, .inline-color").forEach((control) => {
     control.disabled = busy || control.dataset.protected === "true";
   });
@@ -1228,6 +1681,21 @@ function titleCase(value) {
 
 function normalizeName(name) {
   return name.trim().replace(/\s+/g, " ");
+}
+
+function normalizeGithubUsername(name) {
+  return String(name || "")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/[^A-Za-z0-9-]/g, "")
+    .slice(0, 39);
+}
+
+function slugifyName(name) {
+  return normalizeName(String(name || "user"))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "user";
 }
 
 function statusClass(status) {
