@@ -687,7 +687,8 @@ function renderStats(visibleIssues = issues) {
 }
 
 function countStatus(status, visibleIssues = issues) {
-  return visibleIssues.filter((issue) => issue.status === status).length;
+  const key = status.toLowerCase();
+  return visibleIssues.filter((issue) => (issue.status || "").toLowerCase() === key).length;
 }
 
 function normalizeIssue(issue) {
@@ -1770,7 +1771,7 @@ function slugifyName(name) {
 }
 
 function statusClass(status) {
-  return `status-${String(status || "open").replace(/\s+/g, "-")}`;
+  return `status-${String(status || "open").toLowerCase().replace(/\s+/g, "-")}`;
 }
 
 function formatDate(date) {

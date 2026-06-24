@@ -312,6 +312,7 @@ th {
   color: var(--good);
 }
 
+.status-closed,
 .status-closed-but-not-fixed,
 .status-not-doing {
   background: #fde5e9;
