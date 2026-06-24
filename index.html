@@ -97,17 +97,23 @@
           <header class="topbar">
             <div>
               <h1>Settings</h1>
-              <p>Manage reporters, assignees, tags, and workflow statuses.</p>
+              <p>Manage GitHub sync, status types, and mappings.</p>
             </div>
           </header>
           <div class="settings-message" id="settingsMessage" role="status" hidden></div>
 
-          <section class="settings-grid" aria-label="BugNote settings">
+          <nav class="settings-subtabs" aria-label="Settings sections">
+            <button class="settings-subtab active" type="button" data-settings-tab="github" data-settings-tab-label="GitHub">🔗 GitHub</button>
+            <button class="settings-subtab" type="button" data-settings-tab="statuses" data-settings-tab-label="Statuses">📋 Status Types</button>
+            <button class="settings-subtab" type="button" data-settings-tab="mapping" data-settings-tab-label="Mapping">🧩 Mapping Setup</button>
+          </nav>
+
+          <div class="settings-tab-panel active" data-settings-tab-panel="github">
             <article class="settings-panel github-panel">
               <div class="settings-title-row">
                 <div>
-                  <h2>GitHub Sync</h2>
-                  <p>Create or update GitHub issues when BugNote issues are saved.</p>
+                  <h2>GitHub Token</h2>
+                  <p>A GitHub personal access token with <code>repo</code> scope is required to sync issues.</p>
                 </div>
                 <label class="switch-row">
                   <input id="githubEnabled" type="checkbox" />
@@ -115,10 +121,6 @@
                 </label>
               </div>
               <form class="github-form" id="githubForm">
-                <div class="field">
-                  <label for="githubRepoUrl">Repository</label>
-                  <input id="githubRepoUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" />
-                </div>
                 <div class="field">
                   <label for="githubToken">Token</label>
                   <input id="githubToken" type="password" placeholder="Paste token to save or replace" autocomplete="off" />
@@ -129,82 +131,34 @@
                   <button class="primary-button" type="submit">Save</button>
                 </div>
               </form>
-              <div class="assignee-map">
-                <div class="map-head">
-                  <strong>Assignee Mapping</strong>
-                  <span>BugNote assignees must map to assignable GitHub usernames.</span>
-                </div>
-                <div class="map-table" id="assigneeMapTable"></div>
-              </div>
-              <div class="assignee-map">
-                <div class="map-head">
-                  <strong>Status Mapping</strong>
-                  <span>Choose what happens on GitHub when an issue gets each status. Only 3 actions exist: Keep open, Close as completed, or Close as won't fix. Statuses not listed here won't change GitHub.</span>
-                </div>
-                <div class="map-table" id="statusMapTable"></div>
-              </div>
-              <div class="assignee-map">
-                <div class="map-head">
-                  <strong>Multiple Repositories</strong>
-                  <span>Add extra repos to sync issues to multiple GitHub repos. Each issue remembers which repo it was created in.</span>
-                </div>
-                <div class="repos-list" id="reposList"></div>
-                <form class="repo-add-form" id="repoForm">
-                  <div class="field repo-url-field">
-                    <label for="repoUrl">GitHub repo URL</label>
-                    <input id="repoUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" />
-                  </div>
-                  <div class="field repo-name-field">
-                    <label for="repoName">Label (optional)</label>
-                    <input id="repoName" type="text" maxlength="80" placeholder="e.g. Project A" autocomplete="off" />
-                  </div>
-                  <button class="secondary-button" type="submit">Add</button>
-                </form>
-              </div>
             </article>
 
-            <article class="settings-panel">
-              <h2>Reporters</h2>
-              <form class="add-row" data-setting-form="reporters">
-                <div class="field">
-                  <label for="newReporterSetting">Reporter name</label>
-                  <input id="newReporterSetting" type="text" maxlength="80" placeholder="Add reporter" autocomplete="off" />
+            <article class="settings-panel github-panel">
+              <div class="settings-title-row">
+                <div>
+                  <h2>Repositories</h2>
+                  <p>Add one or more GitHub repos to sync issues to. Mark one as default — new issues will use it.</p>
+                </div>
+              </div>
+              <div class="repos-list" id="reposList"></div>
+              <form class="repo-add-form" id="repoForm">
+                <div class="field repo-url-field">
+                  <label for="repoUrl">GitHub repo URL</label>
+                  <input id="repoUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" />
+                </div>
+                <div class="field repo-name-field">
+                  <label for="repoName">Label (optional)</label>
+                  <input id="repoName" type="text" maxlength="80" placeholder="e.g. Project A" autocomplete="off" />
                 </div>
                 <button class="secondary-button" type="submit">Add</button>
               </form>
-              <div class="settings-list" id="reporterSettingsList"></div>
             </article>
+          </div>
 
+          <div class="settings-tab-panel" data-settings-tab-panel="statuses">
             <article class="settings-panel">
-              <h2>Assignees</h2>
-              <form class="add-row" data-setting-form="assignees">
-                <div class="field">
-                  <label for="newAssigneeSetting">Assignee name</label>
-                  <input id="newAssigneeSetting" type="text" maxlength="80" placeholder="Add assignee" autocomplete="off" />
-                </div>
-                <button class="secondary-button" type="submit">Add</button>
-              </form>
-              <div class="settings-list" id="assigneeSettingsList"></div>
-            </article>
-
-            <article class="settings-panel">
-              <h2>Tags</h2>
-              <form class="add-row tag-add-row" data-setting-form="tags">
-                <div class="field">
-                  <label for="newTagSetting">Tag label</label>
-                  <input id="newTagSetting" type="text" maxlength="40" placeholder="Add tag" autocomplete="off" />
-                </div>
-                <div class="field color-field">
-                  <label for="newTagColor">Color</label>
-                  <input id="newTagColor" type="color" value="#0f8b8d" />
-                </div>
-                <button class="secondary-button" type="submit">Add</button>
-              </form>
-              <div class="settings-list" id="tagSettingsList"></div>
-            </article>
-
-            <article class="settings-panel">
-              <h2>Statuses</h2>
+              <h2>Status Types</h2>
+              <p class="settings-panel-desc">Manage the workflow statuses available for issues.</p>
               <form class="add-row" data-setting-form="statuses">
                 <div class="field">
                   <label for="newStatusSetting">Status name</label>
@@ -214,7 +168,74 @@
               </form>
               <div class="settings-list" id="statusSettingsList"></div>
             </article>
-          </section>
+          </div>
+
+          <div class="settings-tab-panel" data-settings-tab-panel="mapping">
+            <article class="settings-panel github-panel">
+              <div class="settings-title-row">
+                <div>
+                  <h2>Assignee → GitHub Mapping</h2>
+                  <p>BugNote assignees must map to assignable GitHub usernames.</p>
+                </div>
+              </div>
+              <div class="map-table" id="assigneeMapTable"></div>
+            </article>
+
+            <article class="settings-panel github-panel">
+              <div class="settings-title-row">
+                <div>
+                  <h2>Status → GitHub Mapping</h2>
+                  <p>Choose what happens on GitHub when an issue gets each status. Only 3 actions exist: Keep open, Close as completed, or Close as won't fix. Statuses not listed here won't change GitHub.</p>
+                </div>
+              </div>
+              <div class="map-table" id="statusMapTable"></div>
+            </article>
+
+            <section class="settings-mapping-grid">
+              <article class="settings-panel">
+                <h2>Reporters</h2>
+                <p class="settings-panel-desc">Manage who can report issues.</p>
+                <form class="add-row" data-setting-form="reporters">
+                  <div class="field">
+                    <label for="newReporterSetting">Reporter name</label>
+                    <input id="newReporterSetting" type="text" maxlength="80" placeholder="Add reporter" autocomplete="off" />
+                  </div>
+                  <button class="secondary-button" type="submit">Add</button>
+                </form>
+                <div class="settings-list" id="reporterSettingsList"></div>
+              </article>
+
+              <article class="settings-panel">
+                <h2>Assignees</h2>
+                <p class="settings-panel-desc">Manage who issues can be assigned to.</p>
+                <form class="add-row" data-setting-form="assignees">
+                  <div class="field">
+                    <label for="newAssigneeSetting">Assignee name</label>
+                    <input id="newAssigneeSetting" type="text" maxlength="80" placeholder="Add assignee" autocomplete="off" />
+                  </div>
+                  <button class="secondary-button" type="submit">Add</button>
+                </form>
+                <div class="settings-list" id="assigneeSettingsList"></div>
+              </article>
+
+              <article class="settings-panel">
+                <h2>Tags</h2>
+                <p class="settings-panel-desc">Manage tags with optional color coding.</p>
+                <form class="add-row tag-add-row" data-setting-form="tags">
+                  <div class="field">
+                    <label for="newTagSetting">Tag label</label>
+                    <input id="newTagSetting" type="text" maxlength="40" placeholder="Add tag" autocomplete="off" />
+                  </div>
+                  <div class="field color-field">
+                    <label for="newTagColor">Color</label>
+                    <input id="newTagColor" type="color" value="#0f8b8d" />
+                  </div>
+                  <button class="secondary-button" type="submit">Add</button>
+                </form>
+                <div class="settings-list" id="tagSettingsList"></div>
+              </article>
+            </section>
+          </div>
         </section>
       </main>
     </div>
@@ -251,6 +272,19 @@
             <select id="issueStatus"></select>
           </div>
         </div>
+
+        <details class="advanced-section" id="advancedRepoSection">
+          <summary class="advanced-summary">Override target repository (optional)</summary>
+          <div class="advanced-panel">
+            <div class="field">
+              <label for="issueRepoSelect">Sync to repository</label>
+              <select id="issueRepoSelect">
+                <option value="">Use default repository</option>
+              </select>
+            </div>
+            <p class="hint">Override only for this issue. The default repo in Settings will be used for subsequent issues.</p>
+          </div>
+        </details>
 
         <div class="field tag-field">
           <label>Tags</label>

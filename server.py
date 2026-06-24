@@ -32,7 +32,7 @@ DEFAULT_SETTINGS = {
     "reporters": ["Habib"],
     "assignees": ["Habib"],
     "tags": [],
-    "statuses": ["open", "fixed", "closed but not fixed", "not doing"],
+    "statuses": ["Open", "Fixed", "Not Doing"],
 }
 
 DEFAULT_TAG_COLOR = "#0f8b8d"
@@ -200,9 +200,8 @@ def default_github_settings():
         "token": "",
         "assigneeMapping": {},
         "statusMapping": {
-            "fixed": "completed",
-            "not doing": "not_planned",
-            "closed but not fixed": "not_planned",
+            "Fixed": "completed",
+            "Not Doing": "not_planned",
         },
         "repos": [],
         "activeRepoIndex": -1,
@@ -242,15 +241,14 @@ def read_github_settings(include_token=False):
 
 def write_github_settings(payload):
     existing = read_github_settings(include_token=True)
-    owner, repo, repo_url = parse_github_repo(payload.get("repoUrl") or existing.get("repoUrl"))
     token = str(payload.get("token", GITHUB_TOKEN_KEEP) or "").strip()
     if token == GITHUB_TOKEN_KEEP:
         token = existing.get("token", "")
     settings = {
-        "enabled": bool(payload.get("enabled")) and bool(owner and repo and token),
-        "repoUrl": repo_url,
-        "owner": owner,
-        "repo": repo,
+        "enabled": bool(payload.get("enabled")) and bool(token),
+        "repoUrl": existing.get("repoUrl", ""),
+        "owner": existing.get("owner", ""),
+        "repo": existing.get("repo", ""),
         "token": token,
         "assigneeMapping": clean_assignee_mapping(payload.get("assigneeMapping", existing.get("assigneeMapping", {}))),
         "statusMapping": clean_status_mapping(payload.get("statusMapping", existing.get("statusMapping", {}))),
@@ -457,47 +455,68 @@ def github_payload_for_issue(issue, settings, base_url):
     return payload, labels, state, state_reason
 
 
-def resolve_github_settings_for_issue(issue):
+def resolve_github_settings_for_issue(issue, override_owner="", override_repo=""):
     """Resolve the GitHub settings to use for a given issue.
     
-    If the issue already has a github reference with owner/repo, looks it up
-    in the repos list. Otherwise returns the active repo or the main settings.
+    Priority:
+    1. If override_owner/override_repo provided (from issue dialog), use that repo.
+    2. If the issue already has a github reference with owner/repo, use that repo.
+    3. Otherwise use the active (default) repo.
+    Also merges top-level assigneeMapping and statusMapping into the repo config.
     """
     settings = read_github_settings(include_token=True)
+    repos = settings.get("repos", [])
+    top_assignee_mapping = settings.get("assigneeMapping", {})
+    top_status_mapping = settings.get("statusMapping", {})
+    
+    def match_repo(owner, repo_name):
+        for rc in repos:
+            if rc.get("owner") == owner and rc.get("repo") == repo_name and rc.get("token"):
+                rc_copy = {**rc}
+                if not rc_copy.get("assigneeMapping"):
+                    rc_copy["assigneeMapping"] = top_assignee_mapping
+                return rc_copy
+        return None
+    
+    # 1. Explicit override from issue dialog
+    if override_owner and override_repo:
+        matched = match_repo(override_owner, override_repo)
+        if matched:
+            return matched, top_status_mapping
+    
+    # 2. Existing github reference on the issue
     github_ref = issue.get("github") if isinstance(issue.get("github"), dict) else {}
     ref_owner = github_ref.get("owner", "")
     ref_repo = github_ref.get("repo", "")
-    
-    repos = settings.get("repos", [])
-    
-    # If the issue has a previous github reference, find matching repo
     if ref_owner and ref_repo:
-        for repo_config in repos:
-            if repo_config.get("owner") == ref_owner and repo_config.get("repo") == ref_repo:
-                return repo_config, settings.get("statusMapping", {})
+        matched = match_repo(ref_owner, ref_repo)
+        if matched:
+            return matched, top_status_mapping
     
-    # Try the active repo index
+    # 3. Active (default) repo
     active_index = settings.get("activeRepoIndex", -1)
     if 0 <= active_index < len(repos):
         repo_config = repos[active_index]
-        if repo_config.get("enabled"):
-            return repo_config, settings.get("statusMapping", {})
+        if repo_config.get("token"):
+            repo_config = {**repo_config}
+            if not repo_config.get("assigneeMapping"):
+                repo_config["assigneeMapping"] = top_assignee_mapping
+            return repo_config, top_status_mapping
     
-    # Fall back to main settings
-    if settings.get("enabled") and settings.get("owner") and settings.get("repo") and settings.get("token"):
-        return settings, settings.get("statusMapping", {})
-    
-    # No active settings
-    return None, settings.get("statusMapping", {})
+    return None, top_status_mapping
 
 
-def sync_issue_to_github(issue, base_url):
+def sync_issue_to_github(issue, base_url, override_owner="", override_repo=""):
     all_settings = read_github_settings(include_token=True)
     
-    # Try to resolve the right settings for this issue
-    repo_settings, status_mapping = resolve_github_settings_for_issue(issue)
+    # Don't sync if GitHub is disabled globally
+    if not all_settings.get("enabled"):
+        return issue
     
-    if not repo_settings or not repo_settings.get("enabled"):
+    # Try to resolve the right settings for this issue
+    repo_settings, status_mapping = resolve_github_settings_for_issue(issue, override_owner, override_repo)
+    
+    if not repo_settings:
         return issue
     
     if not repo_settings.get("owner") or not repo_settings.get("repo") or not repo_settings.get("token"):
@@ -562,16 +581,25 @@ def close_github_issue_on_delete(issue_data):
 
 
 def test_github_connection(settings):
-    owner, repo = settings.get("owner"), settings.get("repo")
-    if not owner or not repo:
-        raise RuntimeError("Enter a GitHub repo link like https://github.com/owner/repo.")
-    github_request(settings, "GET", f"/repos/{owner}/{repo}")
-    for local_name, username in settings.get("assigneeMapping", {}).items():
-        if username:
-            try:
-                valid_github_assignee(settings, username)
-            except RuntimeError as exc:
-                raise RuntimeError(f"{username} is not assignable for {local_name}: {exc}") from exc
+    # Test against the active/default repo from the repos list
+    repos = settings.get("repos", [])
+    active_index = settings.get("activeRepoIndex", -1)
+    if 0 <= active_index < len(repos):
+        repo_config = repos[active_index]
+        owner, repo = repo_config.get("owner"), repo_config.get("repo")
+        if not owner or not repo:
+            raise RuntimeError("The default repo has an invalid URL. Remove and re-add it.")
+        github_request(repo_config, "GET", f"/repos/{owner}/{repo}")
+        for local_name, username in settings.get("assigneeMapping", {}).items():
+            if username:
+                try:
+                    valid_github_assignee(repo_config, username)
+                except RuntimeError as exc:
+                    raise RuntimeError(f"{username} is not assignable for {local_name}: {exc}") from exc
+    elif repos:
+        raise RuntimeError("No repo is set as default. Mark one as default in the Repositories section.")
+    else:
+        raise RuntimeError("Add at least one repository first.")
     return True
 
 
@@ -811,7 +839,9 @@ class Handler(SimpleHTTPRequestHandler):
         if not issue["title"]:
             return self.json({"error": "Title is required"}, 400)
         try:
-            issue = sync_issue_to_github(issue, self.request_base_url())
+            override_owner = str(payload.get("githubRepoOwner") or "").strip()
+            override_repo = str(payload.get("githubRepo") or "").strip()
+            issue = sync_issue_to_github(issue, self.request_base_url(), override_owner, override_repo)
         except RuntimeError as exc:
             issue["githubError"] = str(exc)
         with FILE_LOCK:

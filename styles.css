@@ -500,13 +500,11 @@ dialog::backdrop {
 
 .github-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 0.8fr);
+  grid-template-columns: 1fr;
   gap: 10px;
-  align-items: end;
 }
 
 .github-status-row {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -565,6 +563,60 @@ dialog::backdrop {
   color: var(--good);
   border-color: rgba(20, 122, 69, 0.32);
   background: #eef9f2;
+}
+
+/* Settings sub-tabs */
+.settings-subtabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 0;
+}
+
+.settings-subtab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 16px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.settings-subtab:hover {
+  color: var(--text);
+}
+
+.settings-subtab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.settings-tab-panel {
+  display: none;
+}
+
+.settings-tab-panel.active {
+  display: block;
+}
+
+.settings-panel-desc {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: -8px;
+  margin-bottom: 14px;
+}
+
+/* Settings mapping grid — 3-column for reporters/assignees/tags */
+.settings-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
 }
 
 .assignee-map {
@@ -699,6 +751,40 @@ dialog::backdrop {
 
 .title-field {
   grid-column: span 2;
+}
+
+.advanced-section {
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafcfe;
+}
+
+.advanced-summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+
+.advanced-summary:hover {
+  color: var(--text);
+}
+
+.advanced-panel {
+  padding: 0 14px 14px;
+}
+
+.advanced-panel .field {
+  margin-bottom: 8px;
+}
+
+.advanced-panel .hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .editor-shell {
@@ -1157,6 +1243,11 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .settings-subtabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .title-field {
     grid-column: span 2;
   }
@@ -1229,6 +1320,21 @@ button:disabled {
   .add-row,
   .github-status-row,
   .status-add-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-subtabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 2px;
+  }
+
+  .settings-subtab {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+
+  .settings-mapping-grid {
     grid-template-columns: 1fr;
   }
 

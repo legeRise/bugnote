@@ -28,8 +28,9 @@ const els = {
   tagSettingsList: document.querySelector("#tagSettingsList"),
   statusSettingsList: document.querySelector("#statusSettingsList"),
   settingsMessage: document.querySelector("#settingsMessage"),
+  issueRepoSelect: document.querySelector("#issueRepoSelect"),
+  advancedRepoSection: document.querySelector("#advancedRepoSection"),
   githubForm: document.querySelector("#githubForm"),
-  githubRepoUrl: document.querySelector("#githubRepoUrl"),
   githubToken: document.querySelector("#githubToken"),
   githubEnabled: document.querySelector("#githubEnabled"),
   githubStatus: document.querySelector("#githubStatus"),
@@ -77,6 +78,8 @@ const els = {
   repoTokens: document.querySelector("#repoTokens"),
   repoEnabled: document.querySelector("#repoEnabled"),
   repoAssignees: document.querySelector("#repoAssignees"),
+  settingsSubtabs: document.querySelectorAll("[data-settings-tab]"),
+  settingsTabPanels: document.querySelectorAll("[data-settings-tab-panel]"),
 };
 
 let issues = [];
@@ -164,6 +167,10 @@ function bindEvents() {
       saveSelection();
     });
   });
+
+  els.settingsSubtabs.forEach((tab) => {
+    tab.addEventListener("click", () => switchSettingsTab(tab.dataset.settingsTab));
+  });
 }
 
 async function loadIssues() {
@@ -207,6 +214,15 @@ function switchView(view, options = {}) {
   } else if (options.replace && window.location.pathname !== nextPath) {
     history.replaceState({ view: nextView }, "", nextPath);
   }
+
+  if (nextView === "settings") {
+    switchSettingsTab("github");
+  }
+}
+
+function switchSettingsTab(tabId) {
+  els.settingsSubtabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.settingsTab === tabId));
+  els.settingsTabPanels.forEach((panel) => panel.classList.toggle("active", panel.dataset.settingsTabPanel === tabId));
 }
 
 function renderSettings() {
@@ -214,6 +230,8 @@ function renderSettings() {
   renderSettingsList(els.assigneeSettingsList, "assignees", sortedAssignees());
   renderSettingsList(els.tagSettingsList, "tags", sortedTagLabels(), true);
   renderSettingsList(els.statusSettingsList, "statuses", sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]));
+  renderAssigneeMap();
+  renderStatusMap();
   renderGithubSettings();
 }
 
@@ -263,7 +281,6 @@ function renderSettingsList(container, type, values, useChips = false) {
 }
 
 function renderGithubSettings() {
-  els.githubRepoUrl.value = githubSettings.repoUrl || "";
   els.githubEnabled.checked = !!githubSettings.enabled;
   els.githubEnabled.disabled = isBusy();
   els.githubToken.placeholder = githubSettings.tokenSaved ? "Token saved. Paste a new token to replace." : "Paste a GitHub token";
@@ -272,8 +289,6 @@ function renderGithubSettings() {
   els.githubStatus.className = `github-status ${statusClassName}`.trim();
   els.githubStatus.textContent = githubStatusText();
 
-  renderAssigneeMap();
-  renderStatusMap();
   renderReposList();
 }
 
@@ -438,11 +453,13 @@ async function addRepo(event) {
   githubSettings.repos = repos;
   els.repoName.value = "";
   els.repoUrl.value = "";
-  // Auto-set as active if this is the first repo
+  // Auto-set as default if this is the first repo
   if (repos.length === 1) {
     githubSettings.activeRepoIndex = 0;
   }
   await saveRepos();
+  // After save, force re-render so the default toggle shows properly
+  render();
 }
 
 async function removeRepo(index) {
@@ -458,11 +475,18 @@ async function removeRepo(index) {
 async function setActiveRepo(index) {
   githubSettings.activeRepoIndex = typeof index === "number" && index >= 0 && index < (githubSettings.repos || []).length ? index : -1;
   await saveRepos();
+  render();
 }
 
 async function saveRepos() {
   try {
-    const payload = { repos: githubSettings.repos, activeRepoIndex: githubSettings.activeRepoIndex };
+    const payload = {
+      enabled: githubSettings.enabled,
+      repos: githubSettings.repos,
+      activeRepoIndex: githubSettings.activeRepoIndex,
+      assigneeMapping: readAssigneeMapping(),
+      statusMapping: readStatusMapping(),
+    };
     const result = await apiJson("/api/github-settings", { method: "POST", body: payload });
     githubSettings = normalizeGithubSettings(result.settings);
     renderGithubSettings();
@@ -479,7 +503,7 @@ function escHtml(text) {
 
 function githubStatusText() {
   if (githubSettings.lastMessage) return githubSettings.lastMessage;
-  if (githubSettings.tokenSaved) return "Token saved. Test the connection before enabling sync.";
+  if (githubSettings.tokenSaved) return "Token saved. Add repos and enable sync.";
   return "Not connected.";
 }
 
@@ -499,7 +523,6 @@ function readAssigneeMapping() {
 
 function githubSettingsPayload() {
   const payload = {
-    repoUrl: els.githubRepoUrl.value.trim(),
     enabled: els.githubEnabled.checked,
     assigneeMapping: readAssigneeMapping(),
     statusMapping: readStatusMapping(),
@@ -544,8 +567,11 @@ async function saveGithubSettings(event) {
 }
 
 function githubEnableBlocker(payload) {
-  if (!payload.repoUrl) return "Add the GitHub repository link first.";
   if (!payload.token && !githubSettings.tokenSaved) return "Paste and save a GitHub token first.";
+  const repos = payload.repos || [];
+  const hasEnabledRepo = repos.some((r) => r.enabled) || repos.length > 0;
+  if (!repos.length) return "Add at least one repository first.";
+  if (!repos.some((r) => r.tokenSaved || payload.token)) return "Each repo needs a token to sync.";
   const missing = missingMappedAssignees(payload.assigneeMapping);
   if (missing.length) return `Map GitHub usernames for: ${missing.join(", ")}.`;
   return "";
@@ -554,7 +580,7 @@ function githubEnableBlocker(payload) {
 function needsGithubRetest(payload) {
   return (
     !!payload.token ||
-    payload.repoUrl !== githubSettings.repoUrl ||
+    JSON.stringify(payload.repos || []) !== JSON.stringify(githubSettings.repos || []) ||
     JSON.stringify(payload.assigneeMapping || {}) !== JSON.stringify(githubSettings.assigneeMapping || {}) ||
     !githubSettings.lastTestOk
   );
@@ -655,9 +681,9 @@ function isProtectedSetting(type, value) {
 
 function renderStats(visibleIssues = issues) {
   els.totalCount.textContent = visibleIssues.length;
-  els.openCount.textContent = countStatus("open", visibleIssues);
-  els.fixedCount.textContent = countStatus("fixed", visibleIssues);
-  els.closedCount.textContent = visibleIssues.filter((issue) => issue.status.startsWith("closed")).length;
+  els.openCount.textContent = countStatus("Open", visibleIssues);
+  els.fixedCount.textContent = countStatus("Fixed", visibleIssues);
+  els.closedCount.textContent = visibleIssues.filter((issue) => issue.status.toLowerCase().startsWith("closed")).length;
 }
 
 function countStatus(status, visibleIssues = issues) {
@@ -675,7 +701,7 @@ function normalizeIssue(issue) {
     title: normalizeName(issue.title || `Issue #${number || String(id).padStart(4, "0")}`),
     reporter: normalizeName(issue.reporter || ""),
     assignedTo: normalizeName(issue.assignedTo || ""),
-    status: normalizeName(issue.status || "open") || "open",
+    status: normalizeName(issue.status || "Open") || "Open",
     tags: Array.isArray(issue.tags) ? issue.tags.map(issueTagLabel).filter(Boolean) : [],
     descriptionHtml: String(issue.descriptionHtml || ""),
     media: Array.isArray(issue.media) ? issue.media : [],
@@ -839,9 +865,35 @@ function syncOptions() {
   const statuses = sortedValues([...settings.statuses, ...issues.map((issue) => issue.status).filter(Boolean)]);
   const reporters = sortedReporters();
   const assignees = sortedAssignees();
-  fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), els.issueStatus.value || "open");
+  fillSelect(els.issueStatus, statuses.map((status) => [status, titleCase(status)]), els.issueStatus.value || "Open");
   fillSelect(els.reporterName, [...reporters.map((name) => [name, name]), ["__new__", "New reporter"]], els.reporterName.value);
   fillSelect(els.assignedTo, [["", "Unassigned"], ...assignees.map((name) => [name, name])], els.assignedTo.value);
+  populateIssueRepoSelector();
+}
+
+function populateIssueRepoSelector() {
+  const repos = Array.isArray(githubSettings.repos) ? githubSettings.repos : [];
+  const select = els.issueRepoSelect;
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Use default repository";
+  select.appendChild(defaultOption);
+  repos.forEach((repo, index) => {
+    const option = document.createElement("option");
+    const displayName = repo.name || `${repo.owner}/${repo.repo}`;
+    const repoKey = repo.owner && repo.repo ? `${repo.owner}/${repo.repo}` : "";
+    option.value = repoKey;
+    const isDefault = index === githubSettings.activeRepoIndex;
+    option.textContent = isDefault ? `${displayName} (default)` : displayName;
+    select.appendChild(option);
+  });
+  // Restore previous selection if still valid
+  if ([...select.options].some((opt) => opt.value === currentValue)) {
+    select.value = currentValue;
+  }
 }
 
 function renderIssueTagPicker(selectedTags = []) {
@@ -900,7 +952,7 @@ async function openIssueDialog(id = null) {
   els.reporterName.value = issue?.reporter || defaultReporters[0];
   els.assignedTo.value = issue?.assignedTo || "";
   els.newReporterName.value = "";
-  els.issueStatus.value = issue?.status || "open";
+  els.issueStatus.value = issue?.status || "Open";
   renderIssueTagPicker(issue?.tags || []);
   els.issueDescription.innerHTML = repairMediaHtml(issue?.descriptionHtml || "");
   els.dangerMenu.hidden = !issue;
@@ -909,6 +961,16 @@ async function openIssueDialog(id = null) {
   syncGithubIssueLink(issue);
   els.storageHint.textContent = `Images and videos will be written to media/issue-${String(draftIssueId).padStart(4, "0")}/`;
   toggleNewReporter();
+
+  // Set repo selector — show only if there are repos configured
+  const repos = Array.isArray(githubSettings.repos) ? githubSettings.repos : [];
+  const hasRepos = repos.length > 0;
+  els.advancedRepoSection.hidden = !hasRepos;
+  if (hasRepos) {
+    const issueRepo = issue?.github?.owner && issue?.github?.repo ? `${issue.github.owner}/${issue.github.repo}` : "";
+    els.issueRepoSelect.value = issueRepo || "";
+  }
+
   els.issueDialog.showModal();
   setTimeout(() => els.issueTitle.focus(), 0);
 }
@@ -936,9 +998,21 @@ async function saveIssue(event) {
   if (!reporter) return showError("Reporter is required.");
   if (!stripHtml(descriptionHtml) && !media.length) return showError("Description or media is required.");
 
+  // Determine repo override for this issue
+  const repoOverride = els.issueRepoSelect?.value || "";
+  let githubRepoOwner = "";
+  let githubRepo = "";
+  if (repoOverride) {
+    const parts = repoOverride.split("/");
+    if (parts.length === 2) {
+      githubRepoOwner = parts[0];
+      githubRepo = parts[1];
+    }
+  }
+
   try {
     await withBusy("Saving issue...", async () => {
-      const payload = { id: draftIssueId || editingId, title, reporter, assignedTo, status, tags, descriptionHtml, media };
+      const payload = { id: draftIssueId || editingId, title, reporter, assignedTo, status, tags, descriptionHtml, media, githubRepoOwner, githubRepo };
       const result = await apiJson("/api/issues", { method: "POST", body: payload });
       const saved = normalizeIssue(result.issue);
       const existingIndex = issues.findIndex((issue) => issue.id === saved.id);
@@ -1055,9 +1129,6 @@ function normalizeGithubSettings(data = {}) {
   const repos = Array.isArray(data.repos) ? data.repos.map(normalizeRepo) : [];
   return {
     enabled: !!data.enabled,
-    repoUrl: String(data.repoUrl || ""),
-    owner: String(data.owner || ""),
-    repo: String(data.repo || ""),
     tokenSaved: !!data.tokenSaved,
     assigneeMapping: normalizeAssigneeMapping(data.assigneeMapping),
     statusMapping: normalizeStatusMapping(data.statusMapping),
