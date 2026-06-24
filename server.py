@@ -366,7 +366,7 @@ def markdown_from_html(html, base_url):
         label = html_unescape(alt_match.group(1)) if alt_match else "media"
         if tag.lower().startswith("<video"):
             return f"\n[Video: {label}]({src})\n"
-        return f"\n![{label}]({src})\n"
+        return f"\n[Image: {label}]({src})\n"
 
     template = re.sub(r"<img\b[^>]*>|<video\b[\s\S]*?</video>", media_replacer, template, flags=re.I)
     template = re.sub(r"<li\b[^>]*>", "- ", template, flags=re.I)
