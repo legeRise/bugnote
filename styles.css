@@ -856,8 +856,8 @@ dialog::backdrop {
   color: #9aa6b8;
 }
 
-.editor img,
-.editor video {
+.editor > img,
+.editor > video {
   display: block;
   max-width: min(100%, 760px);
   margin: 10px 0;
@@ -867,15 +867,162 @@ dialog::backdrop {
 }
 
 .media-embed {
-  display: block;
-  width: fit-content;
+  display: inline-grid;
+  width: min(168px, 45vw);
+  aspect-ratio: 1 / 1;
   max-width: 100%;
-  margin: 12px 0;
+  margin: 8px 8px 8px 0;
+  border: 1px solid #cfd9e7;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #eef2f7;
+  box-shadow: 0 8px 22px rgba(34, 48, 74, 0.12);
+  cursor: grab;
+  vertical-align: top;
+  position: relative;
+  user-select: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.media-embed:hover,
+.media-embed:focus-visible {
+  border-color: rgba(36, 89, 214, 0.55);
+  box-shadow: 0 12px 30px rgba(34, 48, 74, 0.18);
+  transform: translateY(-1px);
+  outline: 0;
+}
+
+.media-embed:active {
+  cursor: grabbing;
+}
+
+.media-embed.is-dragging {
+  opacity: 0.58;
+  transform: scale(0.98);
 }
 
 .media-embed img,
 .media-embed video {
+  width: 100%;
+  height: 100%;
   margin: 0;
+  border: 0;
+  border-radius: 0;
+  object-fit: cover;
+  background: #101827;
+  pointer-events: none;
+}
+
+.media-embed::after {
+  content: attr(data-name);
+  position: absolute;
+  inset: auto 7px 7px;
+  min-height: 24px;
+  max-width: calc(100% - 14px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: rgba(16, 24, 39, 0.76);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.media-embed[data-type^="video/"]::before {
+  content: "▶";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(16, 24, 39, 0.76);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.media-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: max(18px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: rgba(8, 13, 24, 0.94);
+}
+
+.media-preview-stage {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.media-preview-stage img,
+.media-preview-stage video {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100dvh - 116px);
+  border-radius: 8px;
+  background: #05070b;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.36);
+  object-fit: contain;
+}
+
+.media-preview-close,
+.media-preview-nav {
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+
+.media-preview-close {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.media-preview-nav {
+  width: 48px;
+  height: 64px;
+  font-size: 46px;
+  line-height: 1;
+}
+
+.media-preview-prev {
+  grid-column: 1;
+}
+
+.media-preview-next {
+  grid-column: 3;
+}
+
+.media-preview-caption {
+  grid-column: 1 / -1;
+  min-height: 24px;
+  color: #e8eef8;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .upload-status {
@@ -1387,42 +1534,92 @@ button:disabled {
     max-height: 100dvh;
     border-radius: 0;
     margin: 0;
+    overflow: auto;
+    overflow-x: hidden;
+    background: #f7f9fc;
   }
 
   .issue-form,
   .camera-panel {
     min-height: 100dvh;
-    padding: 12px;
+    padding: 0 10px;
     display: flex;
     flex-direction: column;
+    overflow-x: hidden;
   }
 
   .dialog-head {
+    position: sticky;
+    top: 0;
+    z-index: 5;
     gap: 10px;
-    margin-bottom: 12px;
+    margin: 0 -10px 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    border-bottom: 1px solid rgba(220, 228, 239, 0.9);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(14px);
   }
 
   .dialog-head h2 {
-    font-size: 21px;
+    font-size: 20px;
     line-height: 1.15;
   }
 
   .dialog-head p {
-    font-size: 13px;
+    max-width: 28ch;
+    font-size: 12px;
+    line-height: 1.25;
+    margin-top: 4px;
+  }
+
+  .icon-button {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+  }
+
+  .issue-meta-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(34, 48, 74, 0.08);
+  }
+
+  .field,
+  .search-wrap {
+    gap: 4px;
+  }
+
+  label,
+  .editor-label {
+    font-size: 11px;
+  }
+
+  input,
+  select {
+    min-height: 38px;
+    border-radius: 7px;
+    padding-inline: 10px;
+    font-size: 14px;
   }
 
   .editor-toolbar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 44px 1fr 1fr;
     gap: 6px;
     overflow: visible;
     align-items: stretch;
+    padding: 7px;
   }
 
   .tool-button {
     width: 100%;
     min-width: 0;
-    height: 38px;
+    height: 36px;
     padding: 0 8px;
     font-size: 12px;
     white-space: normal;
@@ -1439,14 +1636,152 @@ button:disabled {
     font-size: 13px;
   }
 
-  .editor {
-    min-height: 34dvh;
-    max-height: 52dvh;
+  .advanced-section {
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: #fff;
   }
 
-  .editor img,
-  .editor video {
+  .advanced-summary {
+    min-height: 36px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .tag-field {
+    margin-bottom: 10px;
+  }
+
+  .tag-picker {
+    min-height: 44px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 9px;
+    border-radius: 8px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tag-picker::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tag-option {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .tag-chip,
+  .tag-option span {
+    min-height: 28px;
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+
+  .editor-shell {
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(34, 48, 74, 0.08);
+  }
+
+  .editor-label {
+    padding: 10px 12px 0;
+  }
+
+  .editor {
+    min-height: 44dvh;
+    max-height: none;
+    padding: 12px;
+    font-size: 15px;
+    line-height: 1.5;
+    overflow: visible;
+  }
+
+  .editor > img,
+  .editor > video {
     max-width: 100%;
+  }
+
+  .media-embed {
+    width: calc((100% - 10px) / 2);
+    margin: 6px 6px 6px 0;
+    border-radius: 8px;
+  }
+
+  .media-embed:nth-of-type(2n) {
+    margin-right: 0;
+  }
+
+  .media-embed::after {
+    font-size: 10px;
+    min-height: 22px;
+  }
+
+  .hint {
+    padding: 0 12px 10px;
+    font-size: 12px;
+  }
+
+  #storageHint {
+    display: none;
+  }
+
+  .dialog-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    gap: 8px;
+    margin: 10px -10px 0;
+    width: calc(100% + 20px);
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(220, 228, 239, 0.95);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(14px);
+  }
+
+  .dialog-actions .secondary-button,
+  .dialog-actions .primary-button {
+    min-height: 44px;
+  }
+
+  .dialog-left-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .danger-menu,
+  .github-issue-link {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .danger-menu summary,
+  .github-issue-link {
+    min-height: 36px;
+    justify-content: center;
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+
+  .form-error {
+    grid-column: 1 / -1;
+    min-height: 0;
+    font-size: 12px;
+  }
+
+  #cancelIssue {
+    grid-column: 1;
+  }
+
+  #saveIssue {
+    grid-column: 2;
   }
 
   .table-scroll {
@@ -1537,7 +1872,7 @@ button:disabled {
   .dialog-left-actions {
     margin-right: 0;
     align-items: stretch;
-    flex-direction: column;
+    flex-direction: row;
   }
 }
 
@@ -1560,12 +1895,16 @@ button:disabled {
   }
 
   .issue-meta-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .title-field,
   #newReporterField {
-    grid-column: span 1;
+    grid-column: span 2;
+  }
+
+  .issue-meta-grid > .field:last-child {
+    grid-column: span 2;
   }
 
   .camera-actions {
