@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+dist
+__pycache__
+*.py[cod]
+.env
+.venv
+media
+issues
+settings.json
+github_settings.json
+app.js.bak

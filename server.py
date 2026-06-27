@@ -20,10 +20,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ISSUES_DIR = ROOT / "issues"
-MEDIA_DIR = ROOT / "media"
-SETTINGS_PATH = ROOT / "settings.json"
-GITHUB_SETTINGS_PATH = ROOT / "github_settings.json"
+DIST_DIR = ROOT / "dist"
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(ROOT))).resolve()
+ISSUES_DIR = DATA_DIR / "issues"
+MEDIA_DIR = DATA_DIR / "media"
+SETTINGS_PATH = DATA_DIR / "settings.json"
+GITHUB_SETTINGS_PATH = DATA_DIR / "github_settings.json"
 MAX_JSON_BYTES = int(os.environ.get("MAX_JSON_BYTES", str(512 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 FILE_LOCK = threading.Lock()
@@ -688,8 +690,8 @@ def media_only_issue(path):
             {
                 "name": file_path.name,
                 "type": content_type,
-                "url": "/" + file_path.relative_to(ROOT).as_posix(),
-                "path": file_path.relative_to(ROOT).as_posix(),
+                "url": "/" + file_path.relative_to(DATA_DIR).as_posix(),
+                "path": file_path.relative_to(DATA_DIR).as_posix(),
             }
         )
     created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
@@ -725,15 +727,22 @@ class Handler(SimpleHTTPRequestHandler):
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
         ".js": "application/javascript",
+        ".mjs": "application/javascript",
         ".css": "text/css",
         ".html": "text/html",
         ".json": "application/json",
+        ".svg": "image/svg+xml",
     }
 
     def translate_path(self, path):
         path = urllib.parse.urlparse(path).path
         if path in {"/", "/issues", "/settings"}:
-            return str(ROOT / "index.html")
+            built_index = DIST_DIR / "index.html"
+            return str(built_index if built_index.exists() else ROOT / "index.html")
+        if path.startswith("/assets/") and DIST_DIR.exists():
+            return str(DIST_DIR / path.lstrip("/"))
+        if path.startswith("/media/"):
+            return str(DATA_DIR / path.lstrip("/"))
         return str(ROOT / path.lstrip("/"))
 
     def end_headers(self):
@@ -923,8 +932,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "ok": True,
                 "name": path.name,
                 "type": content_type,
-                "url": "/" + path.relative_to(ROOT).as_posix(),
-                "path": path.relative_to(ROOT).as_posix(),
+                "url": "/" + path.relative_to(DATA_DIR).as_posix(),
+                "path": path.relative_to(DATA_DIR).as_posix(),
             }
         )
 
