@@ -3,7 +3,7 @@ services:
     image: "habib926653/bugnote:${BUGNOTE_VERSION:-latest}"
     container_name: bugnote
     ports:
-      - "${BUGNOTE_PORT:-9201}:9201"
+      - "127.0.0.1:${BUGNOTE_PORT:-9201}:9201"
     environment:
       MAX_JSON_BYTES: "${MAX_JSON_BYTES:-524288}"
       MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-262144000}"

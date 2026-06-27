@@ -6,6 +6,8 @@ BugNote is a small file-based issue tracker with a React/Vite frontend and a Pyt
 
 Docker Compose pulls the published `habib926653/bugnote` image, starts BugNote, exposes port 9201, and keeps the current project's `issues/`, `media/`, and settings files available through `/data`.
 
+The published port binds only to `127.0.0.1`, so BugNote is not directly exposed on the server's public network interfaces. A local reverse proxy can safely provide HTTPS and authentication.
+
 ```bash
 docker compose pull
 docker compose up -d
@@ -23,6 +25,8 @@ Rebuilding or removing the container does not delete the project data. To store 
 ```bash
 BUGNOTE_DATA_DIR=/path/to/bugnote-data BUGNOTE_PORT=8080 docker compose up -d
 ```
+
+For example, `BUGNOTE_PORT=9202` makes BugNote available to a reverse proxy at `http://127.0.0.1:9202` without exposing port 9202 publicly.
 
 The data directory must be writable and will contain `issues/`, `media/`, `settings.json`, and `github_settings.json`.
 
