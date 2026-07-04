@@ -6,6 +6,8 @@ import {
   AlertCircle,
   Bug,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   Edit3,
   Github,
@@ -303,6 +305,7 @@ function IssueDialog({ issue, setIssue, settings, github, saving, onSave, onDele
   const selectionRef = useRef(null);
   const [inlineStatus, setInlineStatus] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [viewingImage, setViewingImage] = useState(null);
   if (!issue) return null;
   const tags = settings.tags || [];
   const repos = github.repos || [];
@@ -446,6 +449,7 @@ function IssueDialog({ issue, setIssue, settings, github, saving, onSave, onDele
           onInput={syncEditorHtml}
           onSaveSelection={saveEditorSelection}
           onFiles={uploadInlineFiles}
+          onImageOpen={setViewingImage}
         />
 
         <MediaStudio
@@ -472,11 +476,20 @@ function IssueDialog({ issue, setIssue, settings, github, saving, onSave, onDele
           </Button>
         </div>
       </section>
+      <ImageLightbox
+        viewer={viewingImage}
+        onClose={() => setViewingImage(null)}
+        onNavigate={(direction) => setViewingImage((current) => {
+          if (!current?.images.length) return current;
+          const index = (current.index + direction + current.images.length) % current.images.length;
+          return { ...current, index };
+        })}
+      />
     </Dialog>
   );
 }
 
-function RichDescriptionEditor({ editorRef, html, inlineStatus, uploadProgress, onInput, onSaveSelection, onFiles }) {
+function RichDescriptionEditor({ editorRef, html, inlineStatus, uploadProgress, onInput, onSaveSelection, onFiles, onImageOpen }) {
   useEffect(() => {
     const editor = editorRef.current;
     if (editor && editor.innerHTML !== (html || "")) editor.innerHTML = html || "";
@@ -497,6 +510,24 @@ function RichDescriptionEditor({ editorRef, html, inlineStatus, uploadProgress, 
     saveSelectionFromPoint(event.clientX, event.clientY, editorRef);
     onSaveSelection();
     await onFiles(files, true);
+  }
+
+  function handleClick(event) {
+    const media = event.target.closest?.(".inline-media-embed img, .inline-media-embed video");
+    if (!media) return;
+    event.preventDefault();
+    if (media.tagName === "VIDEO") media.pause();
+    const mediaNodes = [...editorRef.current.querySelectorAll(".inline-media-embed img, .inline-media-embed video")];
+    const images = mediaNodes.map((item) => {
+      const embed = item.closest(".inline-media-embed");
+      return {
+        src: item.currentSrc || item.src,
+        name: embed?.dataset.name || item.alt || "Media attachment",
+        kind: item.tagName === "VIDEO" ? "video" : "image"
+      };
+    });
+    const index = mediaNodes.indexOf(media);
+    onImageOpen({ images, index: Math.max(0, index) });
   }
 
   return (
@@ -527,11 +558,58 @@ function RichDescriptionEditor({ editorRef, html, inlineStatus, uploadProgress, 
         onKeyUp={onSaveSelection}
         onMouseUp={onSaveSelection}
         onFocus={onSaveSelection}
+        onClick={handleClick}
         onPaste={handlePaste}
         onDrop={handleDrop}
         onDragOver={(event) => event.preventDefault()}
       />
     </section>
+  );
+}
+
+function ImageLightbox({ viewer, onClose, onNavigate }) {
+  const image = viewer?.images[viewer.index];
+  useEffect(() => {
+    if (!image) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft") onNavigate(-1);
+      if (event.key === "ArrowRight") onNavigate(1);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [image, onClose, onNavigate]);
+
+  if (!image) return null;
+  return (
+    <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`Viewing ${image.name}`} onMouseDown={onClose}>
+      <div className="image-lightbox-panel" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="image-lightbox-head">
+          <span title={image.name}>
+            {image.name}
+            {viewer.images.length > 1 && <small>{viewer.index + 1} / {viewer.images.length}</small>}
+          </span>
+          <IconButton label="Close image viewer" onClick={onClose}><X size={20} /></IconButton>
+        </div>
+        <div className="image-lightbox-stage">
+          <div className="image-lightbox-canvas">
+            {image.kind === "video" ? (
+              <video key={image.src} src={image.src} controls autoPlay playsInline preload="metadata">
+                Your browser does not support video playback.
+              </video>
+            ) : (
+              <img src={image.src} alt={image.name} />
+            )}
+          </div>
+        </div>
+        {viewer.images.length > 1 && (
+          <>
+            <IconButton className="image-lightbox-nav image-lightbox-prev" label="Previous image" onClick={() => onNavigate(-1)}><ChevronLeft size={28} /></IconButton>
+            <IconButton className="image-lightbox-nav image-lightbox-next" label="Next image" onClick={() => onNavigate(1)}><ChevronRight size={28} /></IconButton>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
