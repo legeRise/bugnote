@@ -961,7 +961,7 @@ function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, s
       {settingsTab === "github" && <GithubSettings github={github} setGithub={setGithub} saveGithub={saveGithub} />}
       {settingsTab === "statuses" && <ListSettings settings={settings} saveSettings={saveSettings} />}
       {settingsTab === "mapping" && <MappingSettings settings={settings} saveSettings={saveSettings} github={github} setGithub={setGithub} saveGithub={saveGithub} />}
-      {settingsTab === "branding" && <BrandingSettings logo={logo} setLogo={setLogo} />}
+      {settingsTab === "branding" && <BrandingSettings branding={branding} setBranding={setBranding} />}
     </>
   );
 }
