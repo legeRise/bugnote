@@ -28,6 +28,8 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 GITHUB_SETTINGS_PATH = DATA_DIR / "github_settings.json"
 MAX_JSON_BYTES = int(os.environ.get("MAX_JSON_BYTES", str(512 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
+MAX_LOGO_BYTES = int(os.environ.get("MAX_LOGO_BYTES", str(10 * 1024 * 1024)))
+LOGO_PATH = DATA_DIR / "logo.png"
 FILE_LOCK = threading.Lock()
 
 DEFAULT_SETTINGS = {
@@ -741,6 +743,8 @@ class Handler(SimpleHTTPRequestHandler):
             return str(built_index if built_index.exists() else ROOT / "index.html")
         if path.startswith("/assets/") and DIST_DIR.exists():
             return str(DIST_DIR / path.lstrip("/"))
+        if path == "/logo.png":
+            return str(LOGO_PATH)
         if path.startswith("/media/"):
             return str(DATA_DIR / path.lstrip("/"))
         return str(ROOT / path.lstrip("/"))
@@ -760,6 +764,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json(read_settings())
         if self.api_path == "/api/github-settings":
             return self.json(read_github_settings())
+        if self.api_path == "/api/branding":
+            return self.json({"logo": "/logo.png" if LOGO_PATH.exists() else ""})
         if self.api_path == "/api/health":
             return self.json({"ok": True})
         return super().do_GET()
@@ -773,6 +779,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.save_settings()
         if self.api_path == "/api/github-settings":
             return self.save_github_settings()
+        if self.api_path == "/api/branding":
+            return self.save_branding()
         if self.api_path == "/api/github-test":
             return self.test_github()
         self.send_error(HTTPStatus.NOT_FOUND)
@@ -904,6 +912,31 @@ class Handler(SimpleHTTPRequestHandler):
         proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip() or "http"
         host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
         return f"{proto}://{host}" if host else ""
+
+    def save_branding(self):
+        ensure_dirs()
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > MAX_LOGO_BYTES:
+            return self.json({"error": "Logo is too large. Maximum size is 10 MB."}, 413)
+        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
+        if "file" not in form:
+            return self.json({"error": "Missing logo file"}, 400)
+        item = form["file"]
+        content_type = str(form.getfirst("type", "") or item.type or "").lower()
+        if not content_type.startswith("image/"):
+            return self.json({"error": "Logo must be an image."}, 400)
+        with FILE_LOCK:
+            temp_path = DATA_DIR / ".logo-upload.tmp"
+            try:
+                with temp_path.open("wb") as output:
+                    shutil.copyfileobj(item.file, output)
+                if not temp_path.stat().st_size:
+                    return self.json({"error": "Logo file is empty."}, 400)
+                temp_path.replace(LOGO_PATH)
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+        self.json({"ok": True, "logo": "/logo.png"})
 
     def save_media(self):
         ensure_dirs()
