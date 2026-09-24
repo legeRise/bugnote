@@ -53,7 +53,7 @@ export default function App() {
   const [issues, setIssues] = useState([]);
   const [settings, setSettings] = useState(normalizeSettings({}));
   const [github, setGithub] = useState(blankGithub);
-  const [logo, setLogo] = useState("");
+  const [branding, setBranding] = useState({ name: "BugNote", logo: "" });
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -98,7 +98,7 @@ export default function App() {
       setIssues((issueData.issues || []).map(normalizeIssue));
       setSettings(normalizeSettings(settingsData));
       setGithub({ ...blankGithub, ...githubData });
-      setLogo(brandingData.logo || "");
+      setBranding({ name: brandingData.name || "BugNote", logo: brandingData.logo || "" });
     });
   }
 
@@ -190,10 +190,10 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className={"brand-mark" + (logo ? " has-logo" : "")}>
-            {logo ? <img src={logo} alt="" /> : <Bug size={19} />}
+          <span className={"brand-mark" + (branding.logo ? " has-logo" : "")}>
+            {branding.logo ? <img src={branding.logo} alt="" /> : <Bug size={19} />}
           </span>
-          <span>BugNote</span>
+          <span className="brand-name">{branding.name}</span>
         </div>
         <nav className="nav-list">
           <button className={view === "issues" ? "active" : ""} onClick={() => setView("issues")}><CircleDot size={18} />Issues</button>
@@ -942,7 +942,7 @@ function annotatedName(name) {
   return `${name.slice(0, dot)}-annotated${name.slice(dot)}`;
 }
 
-function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, settingsTab, setSettingsTab, logo, setLogo }) {
+function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, settingsTab, setSettingsTab, branding, setBranding }) {
   return (
     <>
       <header className="topbar">
@@ -964,9 +964,38 @@ function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, s
   );
 }
 
-function BrandingSettings({ logo, setLogo }) {
+function BrandingSettings({ branding, setBranding }) {
+  const [name, setName] = useState(branding.name || "BugNote");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => setName(branding.name || "BugNote"), [branding.name]);
+
+  async function saveBranding(file = null) {
+    const cleanName = name.trim() || "BugNote";
+    setBusy(true);
+    setMessage("");
+    try {
+      const form = new FormData();
+      form.append("name", cleanName);
+      if (file) {
+        form.append("file", file, file.name);
+        form.append("type", file.type);
+      }
+      const response = await fetch("/api/branding", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Branding save failed.");
+      const next = { name: data.name || cleanName, logo: data.logo || "" };
+      if (next.logo) next.logo += "?v=" + Date.now();
+      setBranding(next);
+      setName(next.name);
+      setMessage("Branding saved.");
+    } catch (error) {
+      setMessage(error.message || "Branding save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function uploadLogo(event) {
     const file = event.target.files?.[0];
@@ -976,22 +1005,7 @@ function BrandingSettings({ logo, setLogo }) {
       setMessage("Please choose an image file.");
       return;
     }
-    setBusy(true);
-    setMessage("");
-    try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      form.append("type", file.type);
-      const response = await fetch("/api/branding", { method: "POST", body: form });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Logo upload failed.");
-      setLogo(data.logo + "?v=" + Date.now());
-      setMessage("Logo saved.");
-    } catch (error) {
-      setMessage(error.message || "Logo upload failed.");
-    } finally {
-      setBusy(false);
-    }
+    await saveBranding(file);
   }
 
   return (
@@ -999,21 +1013,29 @@ function BrandingSettings({ logo, setLogo }) {
       <div className="settings-title-row">
         <div>
           <h2>Branding</h2>
-          <p>Upload a logo for this BugNote installation. It is stored in the persistent data folder.</p>
+          <p>Customize the name and logo shown for this BugNote installation.</p>
+        </div>
+      </div>
+      <div className="form-grid">
+        <Field label="App Name">
+          <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="BugNote" />
+        </Field>
+        <div className="inline-actions">
+          <Button onClick={() => saveBranding()} disabled={busy}><Save size={16} />Save name</Button>
         </div>
       </div>
       <div className="branding-preview">
         <div className="branding-logo">
-          {logo ? <img src={logo} alt="Current logo" /> : <Bug size={28} />}
+          {branding.logo ? <img src={branding.logo} alt="Current logo" /> : <Bug size={28} />}
         </div>
         <div>
-          <strong>{logo ? "Custom logo" : "Default BugNote icon"}</strong>
+          <strong>{branding.logo ? "Custom logo" : "Default BugNote icon"}</strong>
           <p className="muted">PNG, JPG, SVG, or another browser-supported image.</p>
         </div>
       </div>
       <div className="inline-actions">
         <label className="btn btn-outline">
-          {busy ? "Uploading…" : "Upload logo"}
+          {busy ? "Saving…" : "Upload logo"}
           <input type="file" accept="image/*" hidden disabled={busy} onChange={uploadLogo} />
         </label>
       </div>
