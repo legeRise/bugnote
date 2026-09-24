@@ -30,6 +30,7 @@ MAX_JSON_BYTES = int(os.environ.get("MAX_JSON_BYTES", str(512 * 1024)))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_LOGO_BYTES = int(os.environ.get("MAX_LOGO_BYTES", str(10 * 1024 * 1024)))
 LOGO_PATH = DATA_DIR / "logo.png"
+BRANDING_PATH = DATA_DIR / "branding.json"
 FILE_LOCK = threading.Lock()
 
 DEFAULT_SETTINGS = {
@@ -264,6 +265,19 @@ def write_github_settings(payload):
     }
     GITHUB_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     return settings
+
+
+def read_branding():
+    branding = {"name": "BugNote", "logo": ""}
+    try:
+        saved = json.loads(BRANDING_PATH.read_text(encoding="utf-8"))
+        if isinstance(saved, dict):
+            name = re.sub(r"\\s+", " ", str(saved.get("name", "") or "")).strip()[:80]
+            branding["name"] = name or "BugNote"
+    except Exception:
+        pass
+    branding["logo"] = "/logo.png" if LOGO_PATH.exists() else ""
+    return branding
 
 
 def read_settings():
@@ -765,7 +779,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.api_path == "/api/github-settings":
             return self.json(read_github_settings())
         if self.api_path == "/api/branding":
-            return self.json({"logo": "/logo.png" if LOGO_PATH.exists() else ""})
+            return self.json(read_branding())
         if self.api_path == "/api/health":
             return self.json({"ok": True})
         return super().do_GET()
@@ -917,26 +931,31 @@ class Handler(SimpleHTTPRequestHandler):
         ensure_dirs()
         length = int(self.headers.get("Content-Length", "0"))
         if length > MAX_LOGO_BYTES:
-            return self.json({"error": "Logo is too large. Maximum size is 10 MB."}, 413)
+            return self.json({"error": "Branding payload is too large. Maximum size is 10 MB."}, 413)
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
-        if "file" not in form:
-            return self.json({"error": "Missing logo file"}, 400)
-        item = form["file"]
-        content_type = str(form.getfirst("type", "") or item.type or "").lower()
-        if not content_type.startswith("image/"):
-            return self.json({"error": "Logo must be an image."}, 400)
+        name = re.sub(r"\\s+", " ", str(form.getfirst("name", "") or "")).strip()[:80] or "BugNote"
+
+        item = form["file"] if "file" in form else None
+        if item is not None and getattr(item, "filename", None):
+            content_type = str(form.getfirst("type", "") or item.type or "").lower()
+            if not content_type.startswith("image/"):
+                return self.json({"error": "Logo must be an image."}, 400)
+            with FILE_LOCK:
+                temp_path = DATA_DIR / ".logo-upload.tmp"
+                try:
+                    with temp_path.open("wb") as output:
+                        shutil.copyfileobj(item.file, output)
+                    if not temp_path.stat().st_size:
+                        return self.json({"error": "Logo file is empty."}, 400)
+                    temp_path.replace(LOGO_PATH)
+                finally:
+                    if temp_path.exists():
+                        temp_path.unlink()
+
+        branding = {"name": name, "logo": "/logo.png" if LOGO_PATH.exists() else ""}
         with FILE_LOCK:
-            temp_path = DATA_DIR / ".logo-upload.tmp"
-            try:
-                with temp_path.open("wb") as output:
-                    shutil.copyfileobj(item.file, output)
-                if not temp_path.stat().st_size:
-                    return self.json({"error": "Logo file is empty."}, 400)
-                temp_path.replace(LOGO_PATH)
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
-        self.json({"ok": True, "logo": "/logo.png"})
+            BRANDING_PATH.write_text(json.dumps(branding, indent=2) + "\\n", encoding="utf-8")
+        self.json({"ok": True, **branding})
 
     def save_media(self):
         ensure_dirs()
