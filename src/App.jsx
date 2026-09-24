@@ -53,6 +53,7 @@ export default function App() {
   const [issues, setIssues] = useState([]);
   const [settings, setSettings] = useState(normalizeSettings({}));
   const [github, setGithub] = useState(blankGithub);
+  const [logo, setLogo] = useState("");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -88,14 +89,16 @@ export default function App() {
 
   async function refreshAll() {
     await withBusy("Loading BugNote...", async () => {
-      const [issueData, settingsData, githubData] = await Promise.all([
+      const [issueData, settingsData, githubData, brandingData] = await Promise.all([
         apiJson("/api/issues"),
         apiJson("/api/settings"),
-        apiJson("/api/github-settings")
+        apiJson("/api/github-settings"),
+        apiJson("/api/branding")
       ]);
       setIssues((issueData.issues || []).map(normalizeIssue));
       setSettings(normalizeSettings(settingsData));
       setGithub({ ...blankGithub, ...githubData });
+      setLogo(brandingData.logo || "");
     });
   }
 
@@ -187,7 +190,9 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark"><Bug size={19} /></span>
+          <span className={"brand-mark" + (logo ? " has-logo" : "")}>
+            {logo ? <img src={logo} alt="" /> : <Bug size={19} />}
+          </span>
           <span>BugNote</span>
         </div>
         <nav className="nav-list">
@@ -937,7 +942,7 @@ function annotatedName(name) {
   return `${name.slice(0, dot)}-annotated${name.slice(dot)}`;
 }
 
-function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, settingsTab, setSettingsTab }) {
+function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, settingsTab, setSettingsTab, logo, setLogo }) {
   return (
     <>
       <header className="topbar">
@@ -948,13 +953,72 @@ function SettingsView({ settings, saveSettings, github, setGithub, saveGithub, s
       </header>
 
       <nav className="tabs">
-        {["github", "statuses", "mapping"].map((tab) => <button key={tab} className={settingsTab === tab ? "active" : ""} onClick={() => setSettingsTab(tab)}>{titleCase(tab)}</button>)}
+        {["github", "statuses", "mapping", "branding"].map((tab) => <button key={tab} className={settingsTab === tab ? "active" : ""} onClick={() => setSettingsTab(tab)}>{titleCase(tab)}</button>)}
       </nav>
 
       {settingsTab === "github" && <GithubSettings github={github} setGithub={setGithub} saveGithub={saveGithub} />}
       {settingsTab === "statuses" && <ListSettings settings={settings} saveSettings={saveSettings} />}
       {settingsTab === "mapping" && <MappingSettings settings={settings} saveSettings={saveSettings} github={github} setGithub={setGithub} saveGithub={saveGithub} />}
+      {settingsTab === "branding" && <BrandingSettings logo={logo} setLogo={setLogo} />}
     </>
+  );
+}
+
+function BrandingSettings({ logo, setLogo }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function uploadLogo(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setMessage("Please choose an image file.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      form.append("type", file.type);
+      const response = await fetch("/api/branding", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Logo upload failed.");
+      setLogo(data.logo + "?v=" + Date.now());
+      setMessage("Logo saved.");
+    } catch (error) {
+      setMessage(error.message || "Logo upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="settings-panel">
+      <div className="settings-title-row">
+        <div>
+          <h2>Branding</h2>
+          <p>Upload a logo for this BugNote installation. It is stored in the persistent data folder.</p>
+        </div>
+      </div>
+      <div className="branding-preview">
+        <div className="branding-logo">
+          {logo ? <img src={logo} alt="Current logo" /> : <Bug size={28} />}
+        </div>
+        <div>
+          <strong>{logo ? "Custom logo" : "Default BugNote icon"}</strong>
+          <p className="muted">PNG, JPG, SVG, or another browser-supported image.</p>
+        </div>
+      </div>
+      <div className="inline-actions">
+        <label className="btn btn-outline">
+          {busy ? "Uploading…" : "Upload logo"}
+          <input type="file" accept="image/*" hidden disabled={busy} onChange={uploadLogo} />
+        </label>
+      </div>
+      {message && <p className="ok-text">{message}</p>}
+    </section>
   );
 }
 
