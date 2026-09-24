@@ -272,7 +272,7 @@ def read_branding():
     try:
         saved = json.loads(BRANDING_PATH.read_text(encoding="utf-8"))
         if isinstance(saved, dict):
-            name = re.sub(r"\\s+", " ", str(saved.get("name", "") or "")).strip()[:80]
+            name = re.sub(r"\s+", " ", str(saved.get("name", "") or "")).strip()[:80]
             branding["name"] = name or "BugNote"
     except Exception:
         pass
@@ -838,6 +838,8 @@ class Handler(SimpleHTTPRequestHandler):
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -933,7 +935,7 @@ class Handler(SimpleHTTPRequestHandler):
         if length > MAX_LOGO_BYTES:
             return self.json({"error": "Branding payload is too large. Maximum size is 10 MB."}, 413)
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
-        name = re.sub(r"\\s+", " ", str(form.getfirst("name", "") or "")).strip()[:80] or "BugNote"
+        name = re.sub(r"\s+", " ", str(form.getfirst("name", "") or "")).strip()[:80] or "BugNote"
 
         item = form["file"] if "file" in form else None
         if item is not None and getattr(item, "filename", None):
