@@ -1,5 +1,5 @@
 export async function apiJson(path, options = {}) {
-  const init = { method: options.method || "GET", headers: options.headers || {} };
+  const init = { method: options.method || "GET", headers: options.headers || {}, cache: options.cache || "no-store" };
   if (options.body instanceof FormData) {
     init.body = options.body;
   } else if (options.body !== undefined) {
