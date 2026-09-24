@@ -222,6 +222,8 @@ export default function App() {
             saveGithub={(next, token) => withBusy("Saving GitHub settings...", () => saveGithub(next, token))}
             settingsTab={settingsTab}
             setSettingsTab={setSettingsTab}
+            branding={branding}
+            setBranding={setBranding}
           />
         )}
       </main>
