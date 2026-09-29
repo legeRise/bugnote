@@ -633,7 +633,10 @@ function MediaStudio({ onUploadFile, onCameraOpen }) {
   }).use(Webcam, {
     modes: ["picture", "video-audio"],
     mirror: false,
-    showVideoSourceDropdown: true
+    showVideoSourceDropdown: true,
+    videoConstraints: {
+      facingMode: { ideal: "environment" }
+    }
   }), []);
 
   useEffect(() => {
@@ -970,6 +973,7 @@ function BrandingSettings({ branding, setBranding }) {
   const [name, setName] = useState(branding.name || "BugNote");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [cropFile, setCropFile] = useState(null);
 
   useEffect(() => setName(branding.name || "BugNote"), [branding.name]);
 
@@ -999,7 +1003,7 @@ function BrandingSettings({ branding, setBranding }) {
     }
   }
 
-  async function uploadLogo(event) {
+  function uploadLogo(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -1007,42 +1011,216 @@ function BrandingSettings({ branding, setBranding }) {
       setMessage("Please choose an image file.");
       return;
     }
+    setMessage("");
+    setCropFile(file);
+  }
+
+  async function finishCrop(file) {
+    setCropFile(null);
     await saveBranding(file);
   }
 
   return (
-    <section className="settings-panel">
-      <div className="settings-title-row">
-        <div>
-          <h2>Branding</h2>
-          <p>Customize the name and logo shown for this BugNote installation.</p>
+    <>
+      <section className="settings-panel">
+        <div className="settings-title-row">
+          <div>
+            <h2>Branding</h2>
+            <p>Customize the name and logo shown for this BugNote installation.</p>
+          </div>
         </div>
-      </div>
-      <div className="form-grid">
-        <Field label="App Name">
-          <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="BugNote" />
-        </Field>
+        <div className="form-grid">
+          <Field label="App Name">
+            <Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="BugNote" />
+          </Field>
+          <div className="inline-actions">
+            <Button onClick={() => saveBranding()} disabled={busy}><Save size={16} />Save name</Button>
+          </div>
+        </div>
+        <div className="branding-preview">
+          <div className="branding-logo">
+            {branding.logo ? <img src={branding.logo} alt="Current logo" /> : <Bug size={28} />}
+          </div>
+          <div>
+            <strong>{branding.logo ? "Custom logo" : "Default BugNote icon"}</strong>
+            <p className="muted">Choose the crop area before saving so logos with extra whitespace or surrounding artwork fit cleanly.</p>
+          </div>
+        </div>
         <div className="inline-actions">
-          <Button onClick={() => saveBranding()} disabled={busy}><Save size={16} />Save name</Button>
+          <label className="btn btn-outline">
+            {busy ? "Saving…" : "Upload logo"}
+            <input type="file" accept="image/*" hidden disabled={busy} onChange={uploadLogo} />
+          </label>
+        </div>
+        {message && <p className="ok-text">{message}</p>}
+      </section>
+
+      {cropFile && (
+        <LogoCropper
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onDone={finishCrop}
+        />
+      )}
+    </>
+  );
+}
+
+function LogoCropper({ file, onCancel, onDone }) {
+  const imageRef = useRef(null);
+  const stageRef = useRef(null);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [crop, setCrop] = useState({ x: 5, y: 5, width: 90, height: 90 });
+  const dragRef = useRef(null);
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setSourceUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  useEffect(() => {
+    function onPointerMove(event) {
+      const drag = dragRef.current;
+      const stage = stageRef.current;
+      if (!drag || !stage) return;
+      const rect = stage.getBoundingClientRect();
+      const dx = ((event.clientX - drag.startX) / rect.width) * 100;
+      const dy = ((event.clientY - drag.startY) / rect.height) * 100;
+      const minSize = 8;
+
+      if (drag.mode === "move") {
+        setCrop({
+          ...drag.crop,
+          x: Math.max(0, Math.min(100 - drag.crop.width, drag.crop.x + dx)),
+          y: Math.max(0, Math.min(100 - drag.crop.height, drag.crop.y + dy))
+        });
+        return;
+      }
+
+      const next = { ...drag.crop };
+      const right = drag.crop.x + drag.crop.width;
+      const bottom = drag.crop.y + drag.crop.height;
+
+      if (drag.mode.includes("w")) {
+        const nextX = Math.max(0, Math.min(right - minSize, drag.crop.x + dx));
+        next.x = nextX;
+        next.width = right - nextX;
+      }
+      if (drag.mode.includes("e")) {
+        next.width = Math.max(minSize, Math.min(100 - drag.crop.x, drag.crop.width + dx));
+      }
+      if (drag.mode.includes("n")) {
+        const nextY = Math.max(0, Math.min(bottom - minSize, drag.crop.y + dy));
+        next.y = nextY;
+        next.height = bottom - nextY;
+      }
+      if (drag.mode.includes("s")) {
+        next.height = Math.max(minSize, Math.min(100 - drag.crop.y, drag.crop.height + dy));
+      }
+      setCrop(next);
+    }
+
+    function onPointerUp() {
+      dragRef.current = null;
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, []);
+
+  function beginDrag(event, mode) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = {
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      crop: { ...crop }
+    };
+  }
+
+  async function createCroppedFile() {
+    const image = imageRef.current;
+    if (!image || !image.naturalWidth || !image.naturalHeight) throw new Error("Logo image is not ready.");
+    const canvas = document.createElement("canvas");
+    const sx = Math.round((crop.x / 100) * image.naturalWidth);
+    const sy = Math.round((crop.y / 100) * image.naturalHeight);
+    const sw = Math.max(1, Math.round((crop.width / 100) * image.naturalWidth));
+    const sh = Math.max(1, Math.round((crop.height / 100) * image.naturalHeight));
+    canvas.width = sw;
+    canvas.height = sh;
+    const context = canvas.getContext("2d");
+    context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("Could not create the cropped logo.");
+    return new File([blob], "logo-cropped.png", { type: "image/png", lastModified: Date.now() });
+  }
+
+  async function applyCrop() {
+    setWorking(true);
+    try {
+      await onDone(await createCroppedFile());
+    } catch (error) {
+      window.alert(error.message || "Could not crop the logo.");
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="logo-crop-backdrop" role="dialog" aria-modal="true" aria-label="Crop logo">
+      <div className="logo-crop-dialog">
+        <div className="logo-crop-head">
+          <div>
+            <h2>Crop logo</h2>
+            <p>Drag the box to position it. Drag a corner to remove extra space around the logo.</p>
+          </div>
+          <IconButton label="Close cropper" onClick={onCancel} disabled={working}><X size={20} /></IconButton>
+        </div>
+
+        <div className="logo-crop-stage-wrap">
+          <div className="logo-crop-stage" ref={stageRef}>
+            {sourceUrl && (
+              <img
+                ref={imageRef}
+                src={sourceUrl}
+                alt="Logo crop preview"
+                onLoad={() => setCrop({ x: 5, y: 5, width: 90, height: 90 })}
+              />
+            )}
+            <div
+              className="logo-crop-selection"
+              style={{
+                left: crop.x + "%",
+                top: crop.y + "%",
+                width: crop.width + "%",
+                height: crop.height + "%"
+              }}
+              onPointerDown={(event) => beginDrag(event, "move")}
+            >
+              {["nw", "ne", "sw", "se"].map((handle) => (
+                <span
+                  key={handle}
+                  className={"logo-crop-handle logo-crop-handle-" + handle}
+                  onPointerDown={(event) => beginDrag(event, handle)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="logo-crop-actions">
+          <Button variant="outline" onClick={onCancel} disabled={working}>Cancel</Button>
+          <Button onClick={applyCrop} disabled={working}>{working ? "Saving…" : "Crop & save logo"}</Button>
         </div>
       </div>
-      <div className="branding-preview">
-        <div className="branding-logo">
-          {branding.logo ? <img src={branding.logo} alt="Current logo" /> : <Bug size={28} />}
-        </div>
-        <div>
-          <strong>{branding.logo ? "Custom logo" : "Default BugNote icon"}</strong>
-          <p className="muted">PNG, JPG, SVG, or another browser-supported image.</p>
-        </div>
-      </div>
-      <div className="inline-actions">
-        <label className="btn btn-outline">
-          {busy ? "Saving…" : "Upload logo"}
-          <input type="file" accept="image/*" hidden disabled={busy} onChange={uploadLogo} />
-        </label>
-      </div>
-      {message && <p className="ok-text">{message}</p>}
-    </section>
+    </div>
   );
 }
 
