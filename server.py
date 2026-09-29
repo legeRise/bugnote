@@ -789,7 +789,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.api_path == "/api/issues":
             return self.json({"issues": all_issues()})
         if self.api_path == "/api/issues/next-id":
-            issue_id = next_issue_id()
+            # Reserve immediately so concurrent users cannot receive the same number.
+            with FILE_LOCK:
+                issue_id = next_issue_id()
             return self.json({"id": issue_id, "number": issue_number(issue_id)})
         if self.api_path == "/api/settings":
             return self.json(read_settings())
@@ -993,86 +995,86 @@ class Handler(SimpleHTTPRequestHandler):
         content_type = form.getfirst("type", "") or getattr(item, "type", "") or mimetypes.guess_type(name)[0] or "application/octet-stream"
         is_video = str(content_type).lower().startswith("video/")
 
-        with FILE_LOCK:
+        if is_video:
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                return self.json(
+                    {"error": "Video compression is unavailable because FFmpeg is not installed on the server."},
+                    503,
+                )
+
             issue_dir = MEDIA_DIR / f"issue-{issue_number(issue_id)}"
             issue_dir.mkdir(parents=True, exist_ok=True)
 
-            if is_video:
-                ffmpeg = shutil.which("ffmpeg")
-                if not ffmpeg:
-                    return self.json(
-                        {"error": "Video compression is unavailable because FFmpeg is not installed on the server."},
-                        503,
-                    )
+            # The original upload is temporary only. Persistent storage receives
+            # the compressed MP4, never the original video.
+            suffix = Path(name).suffix or ".video"
+            temp_input = None
+            temp_output = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix=".bugnote-video-",
+                    suffix=suffix,
+                    dir=str(DATA_DIR),
+                    delete=False,
+                ) as temp:
+                    temp_input = Path(temp.name)
+                    shutil.copyfileobj(item.file, temp)
 
-                # Keep the original only as a short-lived temporary file. The
-                # persistent media directory receives the compressed MP4 only.
-                suffix = Path(name).suffix or ".video"
-                temp_input = None
-                temp_output = None
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        prefix=".bugnote-video-",
-                        suffix=suffix,
-                        dir=str(DATA_DIR),
-                        delete=False,
-                    ) as temp:
-                        temp_input = Path(temp.name)
-                        shutil.copyfileobj(item.file, temp)
+                output_name = safe_filename(Path(name).stem) + ".mp4"
+                with tempfile.NamedTemporaryFile(
+                    prefix=".bugnote-compressed-",
+                    suffix=".mp4",
+                    dir=str(DATA_DIR),
+                    delete=False,
+                ) as temp:
+                    temp_output = Path(temp.name)
 
-                    output_name = safe_filename(Path(name).stem) + ".mp4"
+                command = [
+                    ffmpeg,
+                    "-y",
+                    "-i", str(temp_input),
+                    "-map", "0:v:0",
+                    "-map", "0:a?",
+                    "-vf", "scale='min(1920,iw)':-2:force_original_aspect_ratio=decrease,fps=30",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "25",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    str(temp_output),
+                ]
+                result = subprocess.run(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=900,
+                )
+                if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+                    detail = (result.stderr or "").strip().splitlines()[-1:]
+                    raise RuntimeError(detail[0] if detail else "FFmpeg could not compress the video.")
+
+                with FILE_LOCK:
                     path = unique_path(issue_dir / output_name)
-                    with tempfile.NamedTemporaryFile(
-                        prefix=".bugnote-compressed-",
-                        suffix=".mp4",
-                        dir=str(DATA_DIR),
-                        delete=False,
-                    ) as temp:
-                        temp_output = Path(temp.name)
-
-                    command = [
-                        ffmpeg,
-                        "-y",
-                        "-i", str(temp_input),
-                        "-map", "0:v:0",
-                        "-map", "0:a?",
-                        "-vf", "scale='min(1920,iw)':-2:force_original_aspect_ratio=decrease,fps=30",
-                        "-c:v", "libx264",
-                        "-preset", "fast",
-                        "-crf", "25",
-                        "-pix_fmt", "yuv420p",
-                        "-c:a", "aac",
-                        "-b:a", "128k",
-                        "-movflags", "+faststart",
-                        str(temp_output),
-                    ]
-                    result = subprocess.run(
-                        command,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        timeout=900,
-                    )
-                    if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
-                        detail = (result.stderr or "").strip().splitlines()[-1:] 
-                        raise RuntimeError(detail[0] if detail else "FFmpeg could not compress the video.")
-
                     temp_output.replace(path)
-                    content_type = "video/mp4"
-                except subprocess.TimeoutExpired:
-                    if temp_output and temp_output.exists():
-                        temp_output.unlink()
-                    return self.json({"error": "Video compression timed out. Try a shorter or smaller video."}, 408)
-                except RuntimeError as exc:
-                    if temp_output and temp_output.exists():
-                        temp_output.unlink()
-                    return self.json({"error": f"Video compression failed: {exc}"}, 500)
-                finally:
-                    if temp_input and temp_input.exists():
-                        temp_input.unlink()
-                    if temp_output and temp_output.exists():
-                        temp_output.unlink()
-            else:
+                temp_output = None
+                content_type = "video/mp4"
+            except subprocess.TimeoutExpired:
+                return self.json({"error": "Video compression timed out. Try a shorter or smaller video."}, 408)
+            except RuntimeError as exc:
+                return self.json({"error": f"Video compression failed: {exc}"}, 500)
+            finally:
+                if temp_input and temp_input.exists():
+                    temp_input.unlink()
+                if temp_output and temp_output.exists():
+                    temp_output.unlink()
+        else:
+            with FILE_LOCK:
+                issue_dir = MEDIA_DIR / f"issue-{issue_number(issue_id)}"
+                issue_dir.mkdir(parents=True, exist_ok=True)
                 path = unique_path(issue_dir / name)
                 with path.open("wb") as output:
                     shutil.copyfileobj(item.file, output)
