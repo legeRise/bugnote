@@ -10,6 +10,10 @@ RUN npm run build
 
 FROM python:3.12-slim
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
     PORT=9201 \
