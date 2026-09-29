@@ -633,7 +633,7 @@ function MediaStudio({ onUploadFile, onCameraOpen }) {
   }).use(Webcam, {
     modes: ["picture", "video-audio"],
     mirror: false,
-    showVideoSourceDropdown: true,
+    showVideoSourceDropdown: false,
     videoConstraints: {
       facingMode: { ideal: "environment" }
     }
