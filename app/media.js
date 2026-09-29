@@ -145,10 +145,14 @@
     if (!mediaFiles.length) return;
     await withBusy(`Uploading ${mediaFiles.length} media file${mediaFiles.length === 1 ? "" : "s"}...`, async () => {
       ns.restoreSelection();
-      for (const file of mediaFiles) {
-        const asset = await uploadMedia(file, file.name, normalizeMediaType(file.type, file.name));
+      const assets = await Promise.all(
+        mediaFiles.map(function (file) {
+          return uploadMedia(file, file.name, normalizeMediaType(file.type, file.name));
+        })
+      );
+      assets.forEach(function (asset) {
         insertMedia(asset.url, asset.type, asset.name, asset.path);
-      }
+      });
       ns.saveSelection();
     });
   }
