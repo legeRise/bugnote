@@ -273,7 +273,12 @@ def write_github_settings(payload):
 def read_branding():
     branding = {"name": "BugNote", "logo": ""}
     try:
-        saved = json.loads(BRANDING_PATH.read_text(encoding="utf-8"))
+        raw = BRANDING_PATH.read_text(encoding="utf-8")
+        # Older builds accidentally wrote a literal "\\n" after the JSON.
+        # Accept that format so existing client branding is not lost.
+        if raw.endswith("\\n"):
+            raw = raw[:-2]
+        saved = json.loads(raw)
         if isinstance(saved, dict):
             name = re.sub(r"\s+", " ", str(saved.get("name", "") or "")).strip()[:80]
             branding["name"] = name or "BugNote"
@@ -975,7 +980,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         branding = {"name": name, "logo": "/logo.png" if LOGO_PATH.exists() else ""}
         with FILE_LOCK:
-            BRANDING_PATH.write_text(json.dumps(branding, indent=2) + "\\n", encoding="utf-8")
+            BRANDING_PATH.write_text(json.dumps(branding, indent=2) + "\n", encoding="utf-8")
         self.json({"ok": True, **branding})
 
     def save_media(self):
