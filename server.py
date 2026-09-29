@@ -10,6 +10,8 @@ import os
 import re
 import shutil
 import socket
+import subprocess
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -31,6 +33,7 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)
 MAX_LOGO_BYTES = int(os.environ.get("MAX_LOGO_BYTES", str(10 * 1024 * 1024)))
 LOGO_PATH = DATA_DIR / "logo.png"
 BRANDING_PATH = DATA_DIR / "branding.json"
+ISSUE_COUNTER_PATH = DATA_DIR / "issue-counter"
 FILE_LOCK = threading.Lock()
 
 DEFAULT_SETTINGS = {
@@ -647,13 +650,27 @@ def unique_path(path):
 
 
 def next_issue_id():
+    """Reserve the next local BugNote issue number.
+
+    The counter makes allocation safe across concurrent users. Existing issue
+    files are still scanned once per allocation so upgrading an old install
+    cannot reuse an already-existing number.
+    """
     ensure_dirs()
-    max_id = 0
+    current = 0
+    try:
+        current = int(ISSUE_COUNTER_PATH.read_text(encoding="utf-8").strip() or "0")
+    except (FileNotFoundError, ValueError):
+        current = 0
+
     for path in ISSUES_DIR.glob("issue-*.json"):
         match = re.search(r"issue-(\d+)\.json$", path.name)
         if match:
-            max_id = max(max_id, int(match.group(1)))
-    return max_id + 1
+            current = max(current, int(match.group(1)))
+
+    next_id = current + 1
+    ISSUE_COUNTER_PATH.write_text(str(next_id), encoding="utf-8")
+    return next_id
 
 
 def read_issue(path):
@@ -973,14 +990,93 @@ class Handler(SimpleHTTPRequestHandler):
 
         item = form["file"]
         name = safe_filename(form.getfirst("name", item.filename or "media"))
+        content_type = form.getfirst("type", "") or getattr(item, "type", "") or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        is_video = str(content_type).lower().startswith("video/")
+
         with FILE_LOCK:
             issue_dir = MEDIA_DIR / f"issue-{issue_number(issue_id)}"
             issue_dir.mkdir(parents=True, exist_ok=True)
-            path = unique_path(issue_dir / name)
-            with path.open("wb") as output:
-                shutil.copyfileobj(item.file, output)
 
-        content_type = form.getfirst("type", "") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            if is_video:
+                ffmpeg = shutil.which("ffmpeg")
+                if not ffmpeg:
+                    return self.json(
+                        {"error": "Video compression is unavailable because FFmpeg is not installed on the server."},
+                        503,
+                    )
+
+                # Keep the original only as a short-lived temporary file. The
+                # persistent media directory receives the compressed MP4 only.
+                suffix = Path(name).suffix or ".video"
+                temp_input = None
+                temp_output = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        prefix=".bugnote-video-",
+                        suffix=suffix,
+                        dir=str(DATA_DIR),
+                        delete=False,
+                    ) as temp:
+                        temp_input = Path(temp.name)
+                        shutil.copyfileobj(item.file, temp)
+
+                    output_name = safe_filename(Path(name).stem) + ".mp4"
+                    path = unique_path(issue_dir / output_name)
+                    with tempfile.NamedTemporaryFile(
+                        prefix=".bugnote-compressed-",
+                        suffix=".mp4",
+                        dir=str(DATA_DIR),
+                        delete=False,
+                    ) as temp:
+                        temp_output = Path(temp.name)
+
+                    command = [
+                        ffmpeg,
+                        "-y",
+                        "-i", str(temp_input),
+                        "-map", "0:v:0",
+                        "-map", "0:a?",
+                        "-vf", "scale='min(1920,iw)':-2:force_original_aspect_ratio=decrease,fps=30",
+                        "-c:v", "libx264",
+                        "-preset", "fast",
+                        "-crf", "25",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "128k",
+                        "-movflags", "+faststart",
+                        str(temp_output),
+                    ]
+                    result = subprocess.run(
+                        command,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=900,
+                    )
+                    if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+                        detail = (result.stderr or "").strip().splitlines()[-1:] 
+                        raise RuntimeError(detail[0] if detail else "FFmpeg could not compress the video.")
+
+                    temp_output.replace(path)
+                    content_type = "video/mp4"
+                except subprocess.TimeoutExpired:
+                    if temp_output and temp_output.exists():
+                        temp_output.unlink()
+                    return self.json({"error": "Video compression timed out. Try a shorter or smaller video."}, 408)
+                except RuntimeError as exc:
+                    if temp_output and temp_output.exists():
+                        temp_output.unlink()
+                    return self.json({"error": f"Video compression failed: {exc}"}, 500)
+                finally:
+                    if temp_input and temp_input.exists():
+                        temp_input.unlink()
+                    if temp_output and temp_output.exists():
+                        temp_output.unlink()
+            else:
+                path = unique_path(issue_dir / name)
+                with path.open("wb") as output:
+                    shutil.copyfileobj(item.file, output)
+
         self.json(
             {
                 "ok": True,
